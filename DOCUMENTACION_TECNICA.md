@@ -173,6 +173,34 @@ contadores en pantalla se reinician al reiniciar el servicio; el CSV persiste.
 
 ---
 
+## 3.10 Interfaz (estilo dashboard Niage)
+
+El panel web sigue el sistema de diseño del dashboard de Niage
+(`democba.niage.es`): **tema oscuro + acento dorado**, tipografía **Inter** con
+fallback de sistema (sin CDN, para funcionar sin internet en el stand) y
+tarjetas redondeadas. Tokens principales:
+
+| Token | Valor |
+|---|---|
+| Acento (primario) | `#fad51b` (variantes `#e8c515`, `#fbe36c`) |
+| Fondo página / tarjeta / elevado | `#0a0a0a` / `#1d1d1d` / `#2a2a2a` |
+| Borde | `#3f3f3f` |
+| Texto / apagado | `#e3e3e3` / `#a8a8a8` |
+| Estado ok / error | `#10b981` / `#ef4444` |
+| Radios | 0.375 / 0.5 / 0.75 rem · glow dorado `0 0 20px #fad51b4d` |
+
+La figura del radar (matplotlib) usa la misma paleta: fondo de tarjeta
+`#1d1d1d`, rejilla `#3f3f3f`, eje 0° y sensor en dorado, manteniendo el
+colormap de distancia (funcional). El HUD se ancla en coordenadas de ejes
+(`transAxes`) para quedar siempre arriba-izquierda aunque `flip_x` invierta el
+eje X.
+
+> Las plantillas de `/settings`, `/stats` y `/grabaciones` se construyen con el
+> operador `%`, así que cualquier `%` literal del CSS debe escaparse como `%%`
+> (o evitarse, p. ej. `border-radius:9999px` en vez de `50%`).
+
+---
+
 ## 4. Referencia de parámetros (`/settings`)
 
 ### ROI y presencia
@@ -218,6 +246,7 @@ contadores en pantalla se reinician al reiniciar el servicio; el CSV persiste.
 | `point_size` / `roi_point_size` | 7 / 22 | tamaño de puntos |
 | `show_trails` | True | dibujar trayectorias (estelas) |
 | `trail_len` | 40 | nº de posiciones de la estela |
+| `flip_x` | False | espejo horizontal (`ax.invert_xaxis()`); corrige la vista si sale derecha↔izquierda |
 | `cmap` | turbo | mapa de color por distancia |
 
 ### LiDAR (reinician el sensor)

@@ -87,6 +87,7 @@ DEFAULTS = {
     "roi_point_size": 22,      # tamano puntos dentro de la ROI
     "show_trails":    True,     # dibujar la trayectoria (estela) de cada persona
     "trail_len":      40,       # nº de posiciones (suavizadas por Kalman) de la estela
+    "flip_x":         False,    # espejo horizontal (si la vista sale derecha<->izquierda)
     "cmap":           "turbo", # mapa de color por distancia
     # --- Lidar (requieren reinicio del sensor) ---
     "scan_frequency": 7.0,
@@ -217,61 +218,73 @@ def clusterizar(fgx, fgy, cfg):
 
 # --- Figura ----------------------------------------------------------------
 def crear_figura(cfg):
+    # Paleta del dashboard Niage (oscuro + acento dorado)
+    BG_PAGE = "#0a0a0a"; BG_CARD = "#1d1d1d"; BORDE = "#3f3f3f"
+    GRID = "#2f2f2f"; APAGADO = "#a8a8a8"; TEXTO = "#e3e3e3"
+    ORO = "#fad51b"; ROJO = "#ef4444"
     lim = float(cfg["view_max"])
-    fig = Figure(figsize=(7.6, 7), facecolor="#0a0f0a")
+    fig = Figure(figsize=(7.6, 7), facecolor=BG_PAGE)
     FigureCanvasAgg(fig)
     ax = fig.add_axes([0.08, 0.06, 0.78, 0.88])   # deja hueco a la derecha p/ barra
-    ax.set_facecolor("#0a0f0a")
+    ax.set_facecolor(BG_CARD)
     ax.set_aspect("equal")
     ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
-    ax.tick_params(colors="#2f6f2f")
+    if cfg.get("flip_x"):      # espejo horizontal: corrige vista derecha<->izquierda
+        ax.invert_xaxis()      # afecta a TODO (puntos, ROI, personas, estelas, ejes)
+    ax.tick_params(colors=APAGADO)
     for s in ax.spines.values():
-        s.set_color("#2f6f2f")
+        s.set_color(BORDE)
     for r in range(1, int(lim) + 1):
-        ax.add_patch(patches.Circle((0, 0), r, fill=False, ec="#1f4f1f", lw=0.8))
-        ax.text(0, r, "%dm" % r, color="#2f6f2f", fontsize=7, ha="center", va="bottom")
+        ax.add_patch(patches.Circle((0, 0), r, fill=False, ec=GRID, lw=0.8))
+        ax.text(0, r, "%dm" % r, color=APAGADO, fontsize=7, ha="center", va="bottom")
     # Radios y etiquetas de grados (referencia para ajustar las zonas).
     for ang in (0, 45, 90, 135, 180, -135, -90, -45):
         rad = math.radians(ang)
         cx, cy = math.cos(rad), math.sin(rad)
         es_cero = (ang == 0)
         ax.plot([0, lim * cx], [0, lim * cy], "-",
-                color="#39c0ff" if es_cero else "#1f4f1f",
-                lw=1.4 if es_cero else 0.6, alpha=0.9 if es_cero else 0.6, zorder=1)
+                color=ORO if es_cero else GRID,
+                lw=1.4 if es_cero else 0.6, alpha=0.95 if es_cero else 0.6, zorder=1)
         ax.text(0.90 * lim * cx, 0.90 * lim * cy, "%d°" % ang,
-                color="#39c0ff" if es_cero else "#5a9f5a", fontsize=9,
-                ha="center", va="center", family="monospace",
+                color=ORO if es_cero else APAGADO, fontsize=9,
+                ha="center", va="center",
                 weight="bold" if es_cero else "normal",
-                bbox=dict(boxstyle="round,pad=0.1", fc="#0a0f0a", ec="none", alpha=0.7))
+                bbox=dict(boxstyle="round,pad=0.1", fc=BG_CARD, ec="none", alpha=0.7))
+    roi_w = cfg["roi_dist_max"] - cfg["roi_dist_min"]
     ax.add_patch(patches.Wedge((0, 0), cfg["roi_dist_max"], cfg["roi_angle_min"],
-                               cfg["roi_angle_max"],
-                               width=cfg["roi_dist_max"] - cfg["roi_dist_min"],
-                               alpha=0.16, color="#00ff66"))
+                               cfg["roi_angle_max"], width=roi_w,
+                               facecolor=ORO, edgecolor="none", alpha=0.08))
+    ax.add_patch(patches.Wedge((0, 0), cfg["roi_dist_max"], cfg["roi_angle_min"],
+                               cfg["roi_angle_max"], width=roi_w,
+                               facecolor="none", edgecolor=ORO, lw=1.3, alpha=0.55))
     if cfg.get("excl_enabled"):    # zona excluida (empleado): roja tenue, rayada
         ax.add_patch(patches.Wedge((0, 0), cfg["excl_dist_max"], cfg["excl_angle_min"],
                                    cfg["excl_angle_max"],
                                    width=cfg["excl_dist_max"] - cfg["excl_dist_min"],
-                                   alpha=0.18, color="#ff3030", hatch="///"))
+                                   alpha=0.18, color=ROJO, hatch="///"))
     if cfg.get("track_enabled"):   # circulo de "cerca" (<near_dist)
         nd = float(cfg["near_dist"])
-        ax.add_patch(patches.Circle((0, 0), nd, fill=False, ec="#ff5050",
+        ax.add_patch(patches.Circle((0, 0), nd, fill=False, ec=ROJO,
                                     lw=1.3, ls="--"))
-        ax.text(0, -nd, "cerca <%.1gm" % nd, color="#ff7777", fontsize=7,
+        ax.text(0, -nd, "cerca <%.1gm" % nd, color=ROJO, fontsize=7,
                 ha="center", va="top")
-    ax.plot(0, 0, "^", color="#ff3030", markersize=12)
+    ax.plot(0, 0, "^", color=ORO, markersize=13, markeredgecolor="#0a0a0a",
+            markeredgewidth=0.8)
 
     cmap = matplotlib.colormaps[cfg.get("cmap", "turbo")]
     norm = Normalize(0, lim)
     sm = ScalarMappable(norm=norm, cmap=cmap); sm.set_array([])
     cax = fig.add_axes([0.88, 0.10, 0.03, 0.80])
     cb = fig.colorbar(sm, cax=cax)
-    cb.set_label("distancia (m)", color="#aaffaa")
-    cb.ax.yaxis.set_tick_params(color="#2f6f2f")
+    cb.set_label("distancia (m)", color=APAGADO)
+    cb.outline.set_edgecolor(BORDE)
+    cb.ax.yaxis.set_tick_params(color=BORDE)
     for t in cb.ax.get_yticklabels():
-        t.set_color("#aaffaa")
+        t.set_color(APAGADO)
 
-    txt = ax.text(-lim + 0.15, lim - 0.45, "", color="#ffffff", fontsize=11,
-                  family="monospace", weight="bold")
+    # HUD anclado a coordenadas de ejes -> siempre arriba-izquierda, aunque flip_x invierta X
+    txt = ax.text(0.02, 0.975, "", transform=ax.transAxes, va="top", ha="left",
+                  color=TEXTO, fontsize=10.5, weight="bold")
     return {"fig": fig, "ax": ax, "txt": txt, "cmap": cmap, "norm": norm,
             "scatters": [], "overlays": []}
 
@@ -297,7 +310,7 @@ def render_frame(F, cfg, xs, ys, ds, rxs, rys, rds, exs, eys, bxs, bys, info):
                                          s=cfg["roi_point_size"], edgecolors="white",
                                          linewidths=0.6))
     # personas seguidas: trayectoria (estela) + circulo + ID + tiempo
-    COL = {"queda": "#ff3b3b", "cerca": "#ffd000", "roi": "#ffffff", "fuera": "#ff9a00"}
+    COL = {"queda": "#ef4444", "cerca": "#fad51b", "roi": "#ffffff", "fuera": "#a8a8a8"}
     mostrar_estela = cfg.get("show_trails", True)
     for tid, x, y, estado, secs, trail in info.get("tracks", []):
         col = COL.get(estado, "#ff9a00")
@@ -334,8 +347,8 @@ def render_frame(F, cfg, xs, ys, ds, rxs, rys, rds, exs, eys, bxs, bys, info):
         estado = ("PRESENCIA  %.1fs" % info["dwell"]) if info["presente"] else "vacio"
         F["txt"].set_text("en ROI: %3d   %s\neventos: %d   %s" %
                           (info["n_roi"], estado, info["eventos"], filtro))
-    F["ax"].set_title("FRadar  -  %s" % time.strftime("%H:%M:%S"),
-                      color="#aaffaa", family="monospace")
+    F["ax"].set_title("FRadar  ·  %s" % time.strftime("%H:%M:%S"),
+                      color="#e3e3e3", weight="bold")
     buf = io.BytesIO()
     F["fig"].savefig(buf, format="png", facecolor=F["fig"].get_facecolor(), dpi=80)
     return buf.getvalue()
@@ -597,36 +610,83 @@ def hilo_lidar():
 # --- Web -------------------------------------------------------------------
 app = Flask(__name__)
 
-PAGINA = """<!doctype html><html><head><meta charset="utf-8">
+PAGINA = """<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FRadar</title>
 <style>
- body{background:#070b07;color:#9f9;font-family:monospace;text-align:center;margin:0;padding:14px}
- h1{font-size:18px;letter-spacing:2px;margin:6px}
- img{border:1px solid #1f4f1f;max-width:96vw;height:auto}
- a.btn{display:inline-block;margin:8px;padding:6px 14px;border:1px solid #2f8f2f;
-       color:#9f9;text-decoration:none;border-radius:4px}
- a.btn:hover{background:#103010}
- .leyenda{margin-top:8px;font-size:13px;color:#7c7}
- .amar{color:#fff}.rojo{color:#ff3030}
+ :root{
+   --bg:#0a0a0a; --card:#1d1d1d; --elev:#2a2a2a; --borde:#3f3f3f;
+   --texto:#e3e3e3; --apag:#a8a8a8; --oro:#fad51b; --rojo:#ef4444; --verde:#10b981;
+   --r-md:.375rem; --r-lg:.5rem; --r-xl:.75rem;
+   --sans:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+ }
+ *{box-sizing:border-box}
+ body{background:var(--bg);color:var(--texto);font-family:var(--sans);
+      margin:0;padding:0;-webkit-font-smoothing:antialiased}
+ .topbar{display:flex;align-items:center;justify-content:space-between;
+   gap:16px;padding:14px 22px;border-bottom:1px solid var(--borde);
+   background:#0d0d0d;position:sticky;top:0;z-index:10}
+ .brand{display:flex;align-items:center;gap:11px}
+ .brand .dot{width:12px;height:12px;border-radius:50%;background:var(--oro);
+   box-shadow:0 0 14px #fad51b80}
+ .brand b{font-size:18px;font-weight:700;letter-spacing:.5px}
+ .brand span{color:var(--apag);font-size:12px;font-weight:500}
+ .nav{display:flex;gap:10px}
+ .btn{display:inline-flex;align-items:center;gap:7px;padding:8px 15px;
+   border:1px solid var(--borde);color:var(--texto);text-decoration:none;
+   border-radius:var(--r-md);font-size:13px;font-weight:500;background:var(--card);
+   transition:.15s}
+ .btn:hover{border-color:var(--oro);color:var(--oro)}
+ .btn.primary{background:var(--oro);color:#1a1a1a;border-color:var(--oro);font-weight:600}
+ .btn.primary:hover{background:#e8c515;color:#1a1a1a}
+ .wrap{max-width:920px;margin:22px auto;padding:0 18px;display:flex;
+   flex-direction:column;gap:18px}
+ .card{background:var(--card);border:1px solid var(--borde);
+   border-radius:var(--r-xl);box-shadow:0 10px 15px -3px #0000001a,0 4px 6px -2px #0000000d}
+ .card .head{display:flex;align-items:center;justify-content:space-between;
+   padding:13px 18px;border-bottom:1px solid var(--borde)}
+ .card .head h2{margin:0;font-size:14px;font-weight:600;color:var(--texto)}
+ .card .head .live{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--apag)}
+ .card .head .live i{width:8px;height:8px;border-radius:50%;background:var(--verde);
+   box-shadow:0 0 8px #10b981aa;animation:pulse 1.6s infinite}
+ @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+ .radar-box{padding:14px;text-align:center}
+ #radar{max-width:100%;height:auto;border-radius:var(--r-lg);display:block;margin:0 auto}
+ .leyenda{padding:16px 18px;display:flex;flex-wrap:wrap;gap:9px 14px;font-size:12.5px}
+ .chip{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;
+   background:var(--elev);border:1px solid var(--borde);border-radius:9999px;color:var(--apag)}
+ .chip .sw{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
+ .leyenda .note{flex-basis:100%;color:var(--apag);font-size:12px;margin-top:4px;line-height:1.5}
+ .leyenda .note b{color:var(--texto)}
 </style></head><body>
- <h1>FRadar</h1>
- <img id="radar" src="/frame.png">
- <div class="leyenda">
-   <span class="rojo">&#9650;</span> lidar &nbsp;|&nbsp;
-   color = distancia (barra derecha) &nbsp;|&nbsp;
-   <span class="amar">puntos con borde blanco</span> = dentro de la ROI
-   <br>Ejes de grados: <span style="color:#39c0ff">0&deg; (azul, derecha)</span>,
-   90&deg; arriba, 180&deg;/-180&deg; izquierda, -90&deg; abajo (giro antihorario)
-   <br>Con filtro de fondo: gris = muebles/paredes fijos; color = lo que se mueve (personas)
-   <br>Personas: <span style="color:#ff9a00">naranja</span>=fuera,
-   <span style="color:#fff">blanco</span>=en zona,
-   <span style="color:#ffd000">amarillo</span>=cerca (&lt;1m),
-   <span style="color:#ff3b3b">rojo</span>=se queda (&gt;10s)
-   <br>La <b>estela</b> de cada persona es su trayectoria suavizada por Kalman
-   (lo mas tenue = mas antiguo).
- </div>
- <a class="btn" href="/settings">&#9881; Ajustes</a>
- <a class="btn" href="/stats">&#128202; Estadisticas</a>
+ <header class="topbar">
+   <div class="brand"><span class="dot"></span>
+     <div><b>FRadar</b> <span>· conteo y permanencia LiDAR</span></div>
+   </div>
+   <nav class="nav">
+     <a class="btn" href="/stats">&#128202; Estadísticas</a>
+     <a class="btn primary" href="/settings">&#9881; Ajustes</a>
+   </nav>
+ </header>
+ <main class="wrap">
+   <section class="card">
+     <div class="head"><h2>Vista del radar</h2>
+       <div class="live"><i></i> en vivo</div></div>
+     <div class="radar-box"><img id="radar" src="/frame.png" alt="radar"></div>
+   </section>
+   <section class="card leyenda">
+     <span class="chip"><span class="sw" style="background:#fad51b"></span> LiDAR / eje 0°</span>
+     <span class="chip"><span class="sw" style="background:#ffffff;border:1px solid #777"></span> borde blanco = ROI</span>
+     <span class="chip"><span class="sw" style="background:#a8a8a8"></span> fuera</span>
+     <span class="chip"><span class="sw" style="background:#ffffff"></span> en zona</span>
+     <span class="chip"><span class="sw" style="background:#fad51b"></span> cerca (&lt;1m)</span>
+     <span class="chip"><span class="sw" style="background:#ef4444"></span> se queda (&gt;10s)</span>
+     <span class="chip"><span class="sw" style="background:#3a3a3a"></span> gris = fondo fijo</span>
+     <span class="note">El color de los puntos = distancia (barra derecha). La
+       <b>estela</b> de cada persona es su trayectoria suavizada por filtro de Kalman
+       (lo más tenue = más antiguo). Ejes: 0° dorado, giro antihorario.</span>
+   </section>
+ </main>
 <script>
  var img=document.getElementById('radar');
  function sig(){ img.src='/frame.png?t='+Date.now(); }
@@ -637,10 +697,9 @@ PAGINA = """<!doctype html><html><head><meta charset="utf-8">
 
 
 def campo(label, name, cfg, paso="any", nota=""):
-    return ("<tr><td style='text-align:right;padding:4px'>%s</td>"
-            "<td><input name='%s' value='%s' step='%s' type='number' "
-            "style='background:#0a0f0a;color:#9f9;border:1px solid #2f6f2f;width:120px'></td>"
-            "<td style='color:#6a6;font-size:12px;padding-left:8px'>%s</td></tr>"
+    return ("<tr><td class='lbl'>%s</td>"
+            "<td><input class='inp' name='%s' value='%s' step='%s' type='number'></td>"
+            "<td class='nota'>%s</td></tr>"
             % (label, name, cfg[name], paso, nota))
 
 
@@ -680,27 +739,31 @@ def settings():
                  campo("Distancia max (m)", "roi_dist_max", cfg) +
                  campo("Min. puntos presencia", "min_points", cfg))
     chk = "checked" if cfg["excl_enabled"] else ""
-    filas_excl = ("<tr><td style='text-align:right;padding:4px'>Activar exclusion</td>"
+    filas_excl = ("<tr><td class='lbl'>Activar exclusion</td>"
                   "<td><input type='checkbox' name='excl_enabled' %s></td>"
-                  "<td style='color:#6a6;font-size:12px;padding-left:8px'>"
+                  "<td class='nota'>"
                   "ignora por completo lo que haya en esta zona</td></tr>" % chk +
                   campo("Angulo min (deg)", "excl_angle_min", cfg) +
                   campo("Angulo max (deg)", "excl_angle_max", cfg) +
                   campo("Distancia min (m)", "excl_dist_min", cfg) +
                   campo("Distancia max (m)", "excl_dist_max", cfg))
     chk_trail = "checked" if cfg["show_trails"] else ""
+    chk_flip = "checked" if cfg["flip_x"] else ""
     filas_vis = (campo("Alcance vista (m)", "view_max", cfg) +
                  campo("Tamano punto", "point_size", cfg) +
                  campo("Tamano punto ROI", "roi_point_size", cfg) +
-                 "<tr><td style='text-align:right;padding:4px'>Mostrar trayectorias</td>"
+                 "<tr><td class='lbl'>Espejo horizontal</td>"
+                 "<td><input type='checkbox' name='flip_x' %s></td>"
+                 "<td class='nota'>"
+                 "actívalo si la vista sale invertida (derecha&harr;izquierda)</td></tr>" % chk_flip +
+                 "<tr><td class='lbl'>Mostrar trayectorias</td>"
                  "<td><input type='checkbox' name='show_trails' %s></td>"
-                 "<td style='color:#6a6;font-size:12px;padding-left:8px'>"
+                 "<td class='nota'>"
                  "dibuja la estela (recorrido) de cada persona</td></tr>" % chk_trail +
                  campo("Longitud estela (puntos)", "trail_len", cfg,
                        nota="cuantas posiciones recientes se dibujan") +
-                 "<tr><td style='text-align:right;padding:4px'>Mapa de color</td>"
-                 "<td><select name='cmap' style='background:#0a0f0a;color:#9f9;"
-                 "border:1px solid #2f6f2f;width:128px'>" +
+                 "<tr><td class='lbl'>Mapa de color</td>"
+                 "<td><select class='inp' name='cmap'>" +
                  "".join("<option%s>%s</option>" % (" selected" if c == cfg["cmap"] else "", c)
                          for c in ("turbo", "jet", "plasma", "viridis", "cool", "hot")) +
                  "</select></td><td></td></tr>")
@@ -708,21 +771,21 @@ def settings():
                    campo("Sample rate (kHz)", "sample_rate", cfg, nota="X2L = 3"))
     chk_bg = "checked" if cfg["bg_filter_enabled"] else ""
     chk_show = "checked" if cfg["show_background"] else ""
-    filas_bg = ("<tr><td style='text-align:right;padding:4px'>Activar filtrado</td>"
+    filas_bg = ("<tr><td class='lbl'>Activar filtrado</td>"
                 "<td><input type='checkbox' name='bg_filter_enabled' %s></td>"
-                "<td style='color:#6a6;font-size:12px;padding-left:8px'>"
+                "<td class='nota'>"
                 "oculta lo fijo, deja solo lo que se mueve (personas)</td></tr>" % chk_bg +
                 campo("Tolerancia (m)", "bg_tolerance", cfg,
                       nota="margen; mas alto filtra mas") +
-                "<tr><td style='text-align:right;padding:4px'>Mostrar fondo (gris)</td>"
+                "<tr><td class='lbl'>Mostrar fondo (gris)</td>"
                 "<td><input type='checkbox' name='show_background' %s></td>"
-                "<td style='color:#6a6;font-size:12px;padding-left:8px'>"
+                "<td class='nota'>"
                 "dibujar lo fijo en gris tenue (o ocultarlo)</td></tr>" % chk_show)
     chk_tr = "checked" if cfg["track_enabled"] else ""
     chk_csv = "checked" if cfg["log_csv"] else ""
-    filas_track = ("<tr><td style='text-align:right;padding:4px'>Activar conteo</td>"
+    filas_track = ("<tr><td class='lbl'>Activar conteo</td>"
                    "<td><input type='checkbox' name='track_enabled' %s></td>"
-                   "<td style='color:#6a6;font-size:12px;padding-left:8px'>"
+                   "<td class='nota'>"
                    "agrupa puntos en personas y las sigue con un ID</td></tr>" % chk_tr +
                    campo("Radio cluster eps (m)", "cluster_eps", cfg,
                          nota="puntos mas cerca de esto = misma persona") +
@@ -741,63 +804,122 @@ def settings():
                          nota="se quedan si llegan a menos de esto") +
                    campo("Tiempo 'se queda' (s)", "stay_near_s", cfg,
                          nota="segundos a <cerca para contar como 'se queda'") +
-                   "<tr><td style='text-align:right;padding:4px'>Registrar CSV</td>"
+                   "<tr><td class='lbl'>Registrar CSV</td>"
                    "<td><input type='checkbox' name='log_csv' %s></td>"
-                   "<td style='color:#6a6;font-size:12px;padding-left:8px'>"
+                   "<td class='nota'>"
                    "guarda cada evento en eventos.csv</td></tr>" % chk_csv)
     with _lock:
         bg_status = _bg_status
         rec_status = _rec_status
-    return """<!doctype html><html><head><meta charset="utf-8"><title>Ajustes radar</title>
+    return """<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>FRadar · Ajustes</title>
 <style>
- body{background:#070b07;color:#9f9;font-family:monospace;margin:0;padding:18px}
- h2{color:#aaffaa;border-bottom:1px solid #1f4f1f;padding-bottom:4px}
- table{margin:6px 0}
- .warn{color:#ffb000;font-size:13px;margin:6px 0}
- .ok{color:#39ff14;margin:8px 0}
- button{background:#103010;color:#9f9;border:1px solid #2f8f2f;padding:8px 18px;
-        border-radius:4px;cursor:pointer;font-family:monospace;margin-top:10px}
- a{color:#9f9}
+ :root{
+   --bg:#0a0a0a; --card:#1d1d1d; --elev:#2a2a2a; --borde:#3f3f3f;
+   --texto:#e3e3e3; --apag:#a8a8a8; --oro:#fad51b; --rojo:#ef4444; --verde:#10b981;
+   --r-md:.375rem; --r-lg:.5rem; --r-xl:.75rem;
+   --sans:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+ }
+ *{box-sizing:border-box}
+ body{background:var(--bg);color:var(--texto);font-family:var(--sans);
+      margin:0;padding:0;-webkit-font-smoothing:antialiased;font-size:14px}
+ .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+   padding:14px 22px;border-bottom:1px solid var(--borde);background:#0d0d0d;
+   position:sticky;top:0;z-index:10}
+ .brand{display:flex;align-items:center;gap:11px}
+ .brand .dot{width:12px;height:12px;border-radius:9999px;background:var(--oro);box-shadow:0 0 14px #fad51b80}
+ .brand b{font-size:18px;font-weight:700;letter-spacing:.5px}
+ .brand span{color:var(--apag);font-size:12px;font-weight:500}
+ .nav{display:flex;gap:10px}
+ .btn{display:inline-flex;align-items:center;gap:7px;padding:8px 15px;border:1px solid var(--borde);
+   color:var(--texto);text-decoration:none;border-radius:var(--r-md);font-size:13px;
+   font-weight:500;background:var(--card);cursor:pointer;font-family:var(--sans);transition:.15s}
+ .btn:hover{border-color:var(--oro);color:var(--oro)}
+ .btn.primary{background:var(--oro);color:#1a1a1a;border-color:var(--oro);font-weight:600}
+ .btn.primary:hover{background:#e8c515}
+ .wrap{max-width:760px;margin:22px auto;padding:0 18px;display:flex;flex-direction:column;gap:18px}
+ .card{background:var(--card);border:1px solid var(--borde);border-radius:var(--r-xl);
+   box-shadow:0 10px 15px -3px #0000001a,0 4px 6px -2px #0000000d;overflow:hidden}
+ .card>.head{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--borde)}
+ .card>.head:before{content:"";width:4px;height:16px;border-radius:2px;background:var(--oro)}
+ .card>.head h2{margin:0;font-size:14px;font-weight:600;border:0}
+ .card>.body{padding:16px 18px}
+ table{width:100%%;border-collapse:collapse}
+ td{padding:5px 4px;vertical-align:middle}
+ td.lbl{text-align:right;color:var(--apag);width:42%%;padding-right:12px}
+ td.nota{color:#8a8a8a;font-size:12px;padding-left:10px;line-height:1.4}
+ .inp{background:#141414;color:var(--texto);border:1px solid var(--borde);
+   border-radius:var(--r-md);padding:6px 9px;width:130px;font-family:var(--sans);font-size:13px;outline:none}
+ .inp:focus{border-color:var(--oro);box-shadow:0 0 0 3px #fad51b33}
+ select.inp{width:140px}
+ input[type=checkbox]{width:16px;height:16px;accent-color:var(--oro);cursor:pointer}
+ .ok{background:#10b98122;border:1px solid #10b98155;color:#6ee7b7;
+   padding:10px 14px;border-radius:var(--r-md);font-size:13px}
+ .ok:empty{display:none}
+ .tip{color:var(--apag);font-size:12.5px;line-height:1.5;margin:0 0 12px}
+ .tip.warn{color:#fbe36c}.tip.danger{color:#fca5a5}
+ .tip a,.body a{color:var(--oro)}
+ .save{position:sticky;bottom:0;background:linear-gradient(transparent,#0a0a0a 40%%);
+   padding:14px 0 4px;text-align:right}
+ @media(max-width:560px){td.lbl{width:auto}.wrap{padding:0 12px}}
 </style></head><body>
- <a href="/">&larr; Volver al radar</a> &nbsp; <a href="/stats">&#128202; Estadisticas</a>
- <h1>Ajustes del radar</h1>
- <div class="ok">%s</div>
+ <header class="topbar">
+   <div class="brand"><span class="dot"></span>
+     <div><b>FRadar</b> <span>· ajustes</span></div></div>
+   <nav class="nav">
+     <a class="btn" href="/stats">&#128202; Estadísticas</a>
+     <a class="btn primary" href="/">&larr; Radar</a></nav>
+ </header>
+ <main class="wrap">
+  <div class="ok">%s</div>
 
- <h2>Filtrado de fondo (separar personas de muebles)</h2>
- <div class="warn" style="color:#7fd0ff">Asegurate de que el stand esta VACIO (sin personas)
-  y pulsa el boton: el sistema aprende muebles/paredes y luego los resta. Estado: <b>%s</b></div>
- <form method="POST" action="/capturar_fondo">
-   <button type="submit">&#128247; Capturar fondo (stand vacio)</button>
- </form>
+  <section class="card"><div class="head"><h2>Filtrado de fondo</h2></div><div class="body">
+    <p class="tip">Con el stand <b>VACÍO</b>, pulsa el botón: el sistema aprende
+     muebles/paredes y luego los resta. Estado: <b>%s</b></p>
+    <form method="POST" action="/capturar_fondo">
+      <button class="btn primary" type="submit">&#128247; Capturar fondo (stand vacío)</button>
+    </form>
+  </div></section>
 
- <h2>Grabador (para afinar offline)</h2>
- <div class="warn" style="color:#7fd0ff">Graba unos segundos de barridos reales para
-  reproducirlos y ajustar el seguimiento sin estar delante del radar. Estado: <b>%s</b>
-  &nbsp;<a href="/grabaciones">ver grabaciones</a></div>
- <form method="POST" action="/grabar">
-   <input name="seg" value="30" type="number" min="1" max="600"
-    style="background:#0a0f0a;color:#9f9;border:1px solid #2f6f2f;width:70px"> segundos
-   <button type="submit">&#9210; Grabar</button>
- </form>
+  <section class="card"><div class="head"><h2>Grabador (afinado offline)</h2></div><div class="body">
+    <p class="tip">Graba unos segundos de barridos reales para reproducirlos y ajustar el
+     seguimiento sin estar delante del radar. Estado: <b>%s</b>
+     &nbsp;<a href="/grabaciones">ver grabaciones</a></p>
+    <form method="POST" action="/grabar">
+      <input class="inp" style="width:80px" name="seg" value="30" type="number" min="1" max="600"> segundos
+      &nbsp;<button class="btn" type="submit">&#9210; Grabar</button>
+    </form>
+  </div></section>
 
- <form method="POST">
-  <table>%s</table>
-  <h2>Conteo de personas (clustering + tracking)</h2>
-  <div class="warn" style="color:#7fd0ff">Funciona mejor con el filtrado de fondo activado.
-   Cuenta personas distintas, distingue "pasa" de "se queda" y mide el tiempo.
-   &nbsp;<a href="/eventos.csv">&#11015; descargar eventos.csv</a></div>
-  <table>%s</table>
-  <h2>Zona de interes (ROI)</h2><table>%s</table>
-  <h2>Zona excluida (empleado)</h2>
-  <div class="warn" style="color:#ff7777">Lo que caiga aqui NO cuenta ni dispara presencia. Util para tapar al empleado / mostrador.</div>
-  <table>%s</table>
-  <h2>Visualizacion</h2><table>%s</table>
-  <h2>Lidar (avanzado)</h2>
-  <div class="warn">&#9888; Cambiar estos valores reinicia el sensor y puede romper
-   la lectura. Para el X2L lo normal es 7 Hz y sample rate 3.</div>
-  <table>%s</table>
-  <button type="submit">Guardar</button>
- </form>
+  <form method="POST">
+   <section class="card"><div class="head"><h2>Filtrado de fondo · ajustes</h2></div>
+     <div class="body"><table>%s</table></div></section>
+
+   <section class="card"><div class="head"><h2>Conteo de personas</h2></div><div class="body">
+     <p class="tip warn">Funciona mejor con el filtrado de fondo activado. Cuenta personas
+      distintas, distingue "pasa" de "se queda" y mide el tiempo.
+      &nbsp;<a href="/eventos.csv">&#11015; descargar eventos.csv</a></p>
+     <table>%s</table></div></section>
+
+   <section class="card"><div class="head"><h2>Zona de interés (ROI)</h2></div>
+     <div class="body"><table>%s</table></div></section>
+
+   <section class="card"><div class="head"><h2>Zona excluida (empleado)</h2></div><div class="body">
+     <p class="tip danger">Lo que caiga aquí NO cuenta ni dispara presencia. Útil para tapar
+      al empleado / mostrador.</p>
+     <table>%s</table></div></section>
+
+   <section class="card"><div class="head"><h2>Visualización</h2></div>
+     <div class="body"><table>%s</table></div></section>
+
+   <section class="card"><div class="head"><h2>LiDAR (avanzado)</h2></div><div class="body">
+     <p class="tip danger">&#9888; Cambiar estos valores reinicia el sensor y puede romper la
+      lectura. Para el X2L lo normal es 7 Hz y sample rate 3.</p>
+     <table>%s</table></div></section>
+
+   <div class="save"><button class="btn primary" type="submit">Guardar cambios</button></div>
+  </form>
+ </main>
 </body></html>""" % (msg, bg_status, rec_status, filas_bg, filas_track, filas_roi, filas_excl, filas_vis, filas_lidar)
 
 
@@ -834,11 +956,34 @@ def grabaciones():
                 return Response(fh.read(), mimetype="application/json",
                                 headers={"Content-Disposition": "attachment; filename=" + nombre})
         return Response("no existe", status=404)
-    items = "".join("<li><a href='/grabaciones?f=%s'>%s</a> &mdash; %d KB</li>" %
+    items = "".join("<li style='margin:7px 0'><a href='/grabaciones?f=%s' "
+                    "style='color:#fad51b'>%s</a> "
+                    "<span style='color:#a8a8a8;font-size:12px'>&mdash; %d KB</span></li>" %
                     (f, f, os.path.getsize(os.path.join(_DIR, f)) // 1024) for f in files)
-    return ("<!doctype html><meta charset=utf-8><body style='background:#070b07;color:#9f9;"
-            "font-family:monospace;padding:18px'><a href='/settings'>&larr; Ajustes</a>"
-            "<h2>Grabaciones</h2><ul>%s</ul></body>" % (items or "<li>(ninguna todavia)</li>"))
+    return ("<!doctype html><html lang=es><head><meta charset=utf-8>"
+            "<meta name=viewport content='width=device-width, initial-scale=1'>"
+            "<title>FRadar · Grabaciones</title><style>"
+            "*{box-sizing:border-box}"
+            "body{background:#0a0a0a;color:#e3e3e3;margin:0;padding:0;"
+            "font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;"
+            "-webkit-font-smoothing:antialiased}"
+            ".topbar{display:flex;align-items:center;justify-content:space-between;"
+            "padding:14px 22px;border-bottom:1px solid #3f3f3f;background:#0d0d0d}"
+            ".brand{display:flex;align-items:center;gap:11px}"
+            ".dot{width:12px;height:12px;border-radius:9999px;background:#fad51b;box-shadow:0 0 14px #fad51b80}"
+            ".brand b{font-size:18px;font-weight:700}.brand span{color:#a8a8a8;font-size:12px}"
+            ".btn{padding:8px 15px;border:1px solid #3f3f3f;color:#e3e3e3;text-decoration:none;"
+            "border-radius:.375rem;font-size:13px;font-weight:500;background:#1d1d1d}"
+            ".wrap{max-width:680px;margin:22px auto;padding:0 18px}"
+            ".panel{background:#1d1d1d;border:1px solid #3f3f3f;border-radius:.75rem;padding:8px 22px}"
+            "h2{font-size:14px;font-weight:600;margin:0 0 12px;display:flex;align-items:center;gap:9px}"
+            "h2:before{content:'';width:4px;height:16px;border-radius:2px;background:#fad51b}"
+            "ul{list-style:none;padding:0;margin:0}</style></head><body>"
+            "<header class=topbar><div class=brand><span class=dot></span>"
+            "<div><b>FRadar</b> <span>· grabaciones</span></div></div>"
+            "<a class=btn href='/settings'>&larr; Ajustes</a></header>"
+            "<main class=wrap><h2>Grabaciones</h2><div class=panel><ul>%s</ul></div></main>"
+            "</body></html>" % (items or "<li style='color:#a8a8a8'>(ninguna todavía)</li>"))
 
 
 @app.route("/stats")
@@ -889,28 +1034,63 @@ def stats():
         c = por_hora.get("%02d" % h, 0)
         w = int(100 * c / maxh) if maxh else 0
         filas.append(
-            "<div style='display:flex;align-items:center;margin:1px 0'>"
-            "<span style='width:42px;text-align:right;color:#6a6'>%02d:00</span>"
-            "<div style='flex:1;margin:0 8px;background:#0d160d'>"
-            "<div style='height:14px;width:%d%%;background:#39ff14'></div></div>"
-            "<span style='width:40px'>%d</span></div>" % (h, w, c))
+            "<div style='display:flex;align-items:center;margin:2px 0'>"
+            "<span style='width:46px;text-align:right;color:#a8a8a8;font-size:12px'>%02d:00</span>"
+            "<div style='flex:1;margin:0 10px;background:#141414;border-radius:9999px;overflow:hidden'>"
+            "<div style='height:12px;width:%d%%;background:#fad51b;border-radius:9999px'></div></div>"
+            "<span style='width:40px;color:#a8a8a8;font-size:12px'>%d</span></div>" % (h, w, c))
     barras = "".join(filas)
 
-    return """<!doctype html><html><head><meta charset="utf-8"><title>FRadar - Estadisticas</title>
+    return """<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FRadar · Estadísticas</title>
 <meta http-equiv="refresh" content="15">
 <style>
- body{background:#070b07;color:#9f9;font-family:monospace;margin:0;padding:18px}
- h1,h2{color:#aaffaa} h2{border-bottom:1px solid #1f4f1f;padding-bottom:4px;margin-top:22px}
- a{color:#9f9}
- .cards{display:flex;flex-wrap:wrap;gap:12px;margin:10px 0}
- .card{background:#0d160d;border:1px solid #1f4f1f;border-radius:6px;padding:12px 18px;min-width:120px}
- .num{font-size:26px;color:#39ff14} .lbl{font-size:12px;color:#7c7}
+ :root{
+   --bg:#0a0a0a; --card:#1d1d1d; --elev:#2a2a2a; --borde:#3f3f3f;
+   --texto:#e3e3e3; --apag:#a8a8a8; --oro:#fad51b;
+   --r-md:.375rem; --r-xl:.75rem;
+   --sans:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+ }
+ *{box-sizing:border-box}
+ body{background:var(--bg);color:var(--texto);font-family:var(--sans);
+      margin:0;padding:0;-webkit-font-smoothing:antialiased}
+ .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+   padding:14px 22px;border-bottom:1px solid var(--borde);background:#0d0d0d}
+ .brand{display:flex;align-items:center;gap:11px}
+ .brand .dot{width:12px;height:12px;border-radius:9999px;background:var(--oro);box-shadow:0 0 14px #fad51b80}
+ .brand b{font-size:18px;font-weight:700;letter-spacing:.5px}
+ .brand span{color:var(--apag);font-size:12px;font-weight:500}
+ .nav{display:flex;gap:10px}
+ .btn{display:inline-flex;align-items:center;gap:7px;padding:8px 15px;border:1px solid var(--borde);
+   color:var(--texto);text-decoration:none;border-radius:var(--r-md);font-size:13px;font-weight:500;
+   background:var(--card);transition:.15s}
+ .btn:hover{border-color:var(--oro);color:var(--oro)}
+ .btn.primary{background:var(--oro);color:#1a1a1a;border-color:var(--oro);font-weight:600}
+ .wrap{max-width:880px;margin:22px auto;padding:0 18px}
+ h2{font-size:14px;font-weight:600;color:var(--texto);margin:26px 0 10px;
+    display:flex;align-items:center;gap:9px}
+ h2:before{content:"";width:4px;height:16px;border-radius:2px;background:var(--oro)}
+ .sub{color:var(--apag);font-size:12px;margin:4px 0 0}
+ .cards{display:flex;flex-wrap:wrap;gap:14px;margin:12px 0}
+ .card{background:var(--card);border:1px solid var(--borde);border-radius:var(--r-xl);
+   padding:16px 20px;min-width:140px;flex:1;
+   box-shadow:0 10px 15px -3px #0000001a,0 4px 6px -2px #0000000d}
+ .num{font-size:30px;font-weight:700;color:var(--oro);line-height:1.1}
+ .lbl{font-size:12px;color:var(--apag);margin-top:4px}
+ .panel{background:var(--card);border:1px solid var(--borde);border-radius:var(--r-xl);padding:16px 20px}
 </style></head><body>
- <a href="/">&larr; Radar</a> &nbsp; <a href="/settings">Ajustes</a> &nbsp;
- <a href="/eventos.csv">&#11015; CSV</a>
- <h1>FRadar &mdash; Estadisticas</h1>
- <div class="lbl">(se refresca cada 15 s)</div>
- <h2>Acumulado historico</h2>
+ <header class="topbar">
+   <div class="brand"><span class="dot"></span>
+     <div><b>FRadar</b> <span>· estadísticas</span></div></div>
+   <nav class="nav">
+     <a class="btn" href="/eventos.csv">&#11015; CSV</a>
+     <a class="btn" href="/settings">&#9881; Ajustes</a>
+     <a class="btn primary" href="/">&larr; Radar</a></nav>
+ </header>
+ <main class="wrap">
+ <p class="sub">Se actualiza cada 15 s</p>
+ <h2>Acumulado histórico</h2>
  <div class="cards">
   <div class="card"><div class="num">%d</div><div class="lbl">total personas</div></div>
   <div class="card"><div class="num">%d</div><div class="lbl">PASAN</div></div>
@@ -924,8 +1104,9 @@ def stats():
   <div class="card"><div class="num">%d</div><div class="lbl">pasan hoy</div></div>
   <div class="card"><div class="num">%d</div><div class="lbl">se quedan hoy</div></div>
  </div>
- <h2>Afluencia por hora del dia</h2>
- %s
+ <h2>Afluencia por hora del día</h2>
+ <div class="panel">%s</div>
+ </main>
 </body></html>""" % (total, pasan, quedan, pct, dwell_medio, dwell_max,
                      hoy, hoy_pasan, hoy_quedan, barras)
 

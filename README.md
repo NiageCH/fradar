@@ -12,6 +12,14 @@ de cada persona.
 
 ![Vista del panel: radar cenital con personas seguidas](docs/panel.png)
 
+La interfaz sigue el estilo del dashboard de Niage: **tema oscuro con acento
+dorado** (`#fad51b`), tipografía Inter y tarjetas redondeadas. Páginas de
+**ajustes** y **estadísticas**:
+
+| Ajustes | Estadísticas |
+|---|---|
+| ![Ajustes](docs/ajustes.png) | ![Estadísticas](docs/stats.png) |
+
 ---
 
 ## Características
