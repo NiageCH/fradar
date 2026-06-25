@@ -1,0 +1,26 @@
+# --- Configuración local del agente / editor (puede contener credenciales) ---
+.claude/
+.vscode/
+.idea/
+
+# --- macOS / SO ---
+.DS_Store
+Thumbs.db
+
+# --- Python ---
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# --- Datos de ejecución (se generan en cada equipo, no van al repo) ---
+config.json
+bg_reference.json
+eventos.csv
+grabacion_*.jsonl
+
+# --- Backups ---
+*.bak
+*.orig
