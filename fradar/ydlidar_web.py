@@ -631,6 +631,12 @@ PAGINA = """<!doctype html><html lang="es"><head><meta charset="utf-8">
    box-shadow:0 0 14px #fad51b80}
  .brand b{font-size:18px;font-weight:700;letter-spacing:.5px}
  .brand span{color:var(--apag);font-size:12px;font-weight:500}
+ .logo-main{height:34px;width:auto;display:block}
+ .brand .sep{width:1px;height:26px;background:var(--borde)}
+ .brand .mod{color:var(--apag);font-size:12px;font-weight:500;white-space:nowrap}
+ .foot{display:flex;align-items:center;justify-content:center;gap:11px;padding:26px 16px 22px;
+   color:var(--apag);font-size:11.5px;border-top:1px solid var(--borde);margin-top:10px}
+ .logo-foot{height:30px;width:auto;opacity:.92}
  .nav{display:flex;gap:10px}
  .btn{display:inline-flex;align-items:center;gap:7px;padding:8px 15px;
    border:1px solid var(--borde);color:var(--texto);text-decoration:none;
@@ -660,8 +666,10 @@ PAGINA = """<!doctype html><html lang="es"><head><meta charset="utf-8">
  .leyenda .note b{color:var(--texto)}
 </style></head><body>
  <header class="topbar">
-   <div class="brand"><span class="dot"></span>
-     <div><b>FRadar</b> <span>· conteo y permanencia LiDAR</span></div>
+   <div class="brand">
+     <img class="logo-main" src="/logo/customerhub.png" alt="Customer Hub">
+     <span class="sep"></span>
+     <span class="mod">FRadar · conteo y permanencia LiDAR</span>
    </div>
    <nav class="nav">
      <a class="btn" href="/stats">&#128202; Estadísticas</a>
@@ -687,6 +695,8 @@ PAGINA = """<!doctype html><html lang="es"><head><meta charset="utf-8">
        (lo más tenue = más antiguo). Ejes: 0° dorado, giro antihorario.</span>
    </section>
  </main>
+ <footer class="foot"><span>powered by</span>
+   <img class="logo-foot" src="/logo/niage.png" alt="Niage"></footer>
 <script>
  var img=document.getElementById('radar');
  function sig(){ img.src='/frame.png?t='+Date.now(); }
@@ -830,6 +840,12 @@ def settings():
  .brand .dot{width:12px;height:12px;border-radius:9999px;background:var(--oro);box-shadow:0 0 14px #fad51b80}
  .brand b{font-size:18px;font-weight:700;letter-spacing:.5px}
  .brand span{color:var(--apag);font-size:12px;font-weight:500}
+ .logo-main{height:34px;width:auto;display:block}
+ .brand .sep{width:1px;height:26px;background:var(--borde)}
+ .brand .mod{color:var(--apag);font-size:12px;font-weight:500;white-space:nowrap}
+ .foot{display:flex;align-items:center;justify-content:center;gap:11px;padding:26px 16px 22px;
+   color:var(--apag);font-size:11.5px;border-top:1px solid var(--borde);margin-top:10px}
+ .logo-foot{height:30px;width:auto;opacity:.92}
  .nav{display:flex;gap:10px}
  .btn{display:inline-flex;align-items:center;gap:7px;padding:8px 15px;border:1px solid var(--borde);
    color:var(--texto);text-decoration:none;border-radius:var(--r-md);font-size:13px;
@@ -864,8 +880,9 @@ def settings():
  @media(max-width:560px){td.lbl{width:auto}.wrap{padding:0 12px}}
 </style></head><body>
  <header class="topbar">
-   <div class="brand"><span class="dot"></span>
-     <div><b>FRadar</b> <span>· ajustes</span></div></div>
+   <div class="brand">
+     <img class="logo-main" src="/logo/customerhub.png" alt="Customer Hub">
+     <span class="sep"></span><span class="mod">FRadar · ajustes</span></div>
    <nav class="nav">
      <a class="btn" href="/stats">&#128202; Estadísticas</a>
      <a class="btn primary" href="/">&larr; Radar</a></nav>
@@ -920,6 +937,8 @@ def settings():
    <div class="save"><button class="btn primary" type="submit">Guardar cambios</button></div>
   </form>
  </main>
+ <footer class="foot"><span>powered by</span>
+   <img class="logo-foot" src="/logo/niage.png" alt="Niage"></footer>
 </body></html>""" % (msg, bg_status, rec_status, filas_bg, filas_track, filas_roi, filas_excl, filas_vis, filas_lidar)
 
 
@@ -972,6 +991,12 @@ def grabaciones():
             ".brand{display:flex;align-items:center;gap:11px}"
             ".dot{width:12px;height:12px;border-radius:9999px;background:#fad51b;box-shadow:0 0 14px #fad51b80}"
             ".brand b{font-size:18px;font-weight:700}.brand span{color:#a8a8a8;font-size:12px}"
+            ".logo-main{height:32px;width:auto;display:block}"
+            ".sep{width:1px;height:24px;background:#3f3f3f}"
+            ".mod{color:#a8a8a8;font-size:12px}"
+            ".foot{display:flex;align-items:center;justify-content:center;gap:11px;padding:26px 16px;"
+            "color:#a8a8a8;font-size:11.5px;border-top:1px solid #3f3f3f;margin-top:18px}"
+            ".logo-foot{height:28px;opacity:.92}"
             ".btn{padding:8px 15px;border:1px solid #3f3f3f;color:#e3e3e3;text-decoration:none;"
             "border-radius:.375rem;font-size:13px;font-weight:500;background:#1d1d1d}"
             ".wrap{max-width:680px;margin:22px auto;padding:0 18px}"
@@ -979,10 +1004,13 @@ def grabaciones():
             "h2{font-size:14px;font-weight:600;margin:0 0 12px;display:flex;align-items:center;gap:9px}"
             "h2:before{content:'';width:4px;height:16px;border-radius:2px;background:#fad51b}"
             "ul{list-style:none;padding:0;margin:0}</style></head><body>"
-            "<header class=topbar><div class=brand><span class=dot></span>"
-            "<div><b>FRadar</b> <span>· grabaciones</span></div></div>"
+            "<header class=topbar><div class=brand>"
+            "<img class=logo-main src='/logo/customerhub.png' alt='Customer Hub'>"
+            "<span class=sep></span><span class=mod>FRadar · grabaciones</span></div>"
             "<a class=btn href='/settings'>&larr; Ajustes</a></header>"
             "<main class=wrap><h2>Grabaciones</h2><div class=panel><ul>%s</ul></div></main>"
+            "<footer class=foot><span>powered by</span>"
+            "<img class=logo-foot src='/logo/niage.png' alt='Niage'></footer>"
             "</body></html>" % (items or "<li style='color:#a8a8a8'>(ninguna todavía)</li>"))
 
 
@@ -1061,6 +1089,12 @@ def stats():
  .brand .dot{width:12px;height:12px;border-radius:9999px;background:var(--oro);box-shadow:0 0 14px #fad51b80}
  .brand b{font-size:18px;font-weight:700;letter-spacing:.5px}
  .brand span{color:var(--apag);font-size:12px;font-weight:500}
+ .logo-main{height:34px;width:auto;display:block}
+ .brand .sep{width:1px;height:26px;background:var(--borde)}
+ .brand .mod{color:var(--apag);font-size:12px;font-weight:500;white-space:nowrap}
+ .foot{display:flex;align-items:center;justify-content:center;gap:11px;padding:26px 16px 22px;
+   color:var(--apag);font-size:11.5px;border-top:1px solid var(--borde);margin-top:10px}
+ .logo-foot{height:30px;width:auto;opacity:.92}
  .nav{display:flex;gap:10px}
  .btn{display:inline-flex;align-items:center;gap:7px;padding:8px 15px;border:1px solid var(--borde);
    color:var(--texto);text-decoration:none;border-radius:var(--r-md);font-size:13px;font-weight:500;
@@ -1081,8 +1115,9 @@ def stats():
  .panel{background:var(--card);border:1px solid var(--borde);border-radius:var(--r-xl);padding:16px 20px}
 </style></head><body>
  <header class="topbar">
-   <div class="brand"><span class="dot"></span>
-     <div><b>FRadar</b> <span>· estadísticas</span></div></div>
+   <div class="brand">
+     <img class="logo-main" src="/logo/customerhub.png" alt="Customer Hub">
+     <span class="sep"></span><span class="mod">FRadar · estadísticas</span></div>
    <nav class="nav">
      <a class="btn" href="/eventos.csv">&#11015; CSV</a>
      <a class="btn" href="/settings">&#9881; Ajustes</a>
@@ -1107,6 +1142,8 @@ def stats():
  <h2>Afluencia por hora del día</h2>
  <div class="panel">%s</div>
  </main>
+ <footer class="foot"><span>powered by</span>
+   <img class="logo-foot" src="/logo/niage.png" alt="Niage"></footer>
 </body></html>""" % (total, pasan, quedan, pct, dwell_medio, dwell_max,
                      hoy, hoy_pasan, hoy_quedan, barras)
 
@@ -1120,6 +1157,24 @@ def eventos_csv():
         data = "fecha_hora,track_id,dwell_s,tipo\n"
     return Response(data, mimetype="text/csv",
                     headers={"Content-Disposition": "attachment; filename=eventos.csv"})
+
+
+_LOGOS = {"customerhub.png": "logo_customerhub.png", "niage.png": "logo_niage.png"}
+
+
+@app.route("/logo/<name>")
+def logo(name):
+    fname = _LOGOS.get(name)
+    if not fname:
+        return Response("no", status=404)
+    ruta = os.path.join(_DIR, fname)
+    try:
+        with open(ruta, "rb") as fh:
+            data = fh.read()
+    except FileNotFoundError:
+        return Response("sin logo", status=404)
+    return Response(data, mimetype="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.route("/")
