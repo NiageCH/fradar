@@ -127,13 +127,22 @@ x = [x, y, vx, vy]
 El Kalman aporta la **posición suavizada** que se usa tanto para asociar como
 para dibujar (incluida la estela), y la **velocidad** `(vx, vy)`.
 
-### 3.5 Asociación óptima (húngaro)
+### 3.5 Asociación óptima (húngaro) con gating robusto
 
-`Tracker._asignar()` construye la matriz de costes = distancia euclídea entre
-la posición **predicha** de cada track y cada detección, y resuelve con
-`scipy.optimize.linear_sum_assignment`. Solo se aceptan parejas dentro de una
+`Tracker._asignar()` construye la matriz de costes y resuelve con
+`scipy.optimize.linear_sum_assignment`; solo se aceptan parejas dentro de una
 **puerta** (`gate_dist`). Esto evita que se intercambien IDs cuando dos personas
 se cruzan.
+
+**Gating robusto ante cambios de dirección:** el coste de cada pareja es la
+**menor** de dos distancias — a la posición *predicha* por el Kalman y a la
+*última posición vista* (`last_xy`). Con velocidad constante, cuando una persona
+gira o se da la vuelta la predicción "se pasa de largo" en la dirección antigua
+y la detección real cae fuera de la puerta → el track no casaba y nacía un ID
+nuevo. Asociando también por la última posición vista, el giro ya no rompe la
+asociación y se conserva el mismo ID. Se complementa con velocidad amortiguada
+(`kalman_vel_damp`) y más ruido de proceso (`kalman_q`) para que la velocidad se
+readapte rápido tras el giro.
 
 ### 3.6 Confirmación M-de-N
 
@@ -145,8 +154,12 @@ Un track nuevo no es "oficial" hasta acumular `n_confirm` aciertos seguidos
 - Un track que falla más de `max_misses` veces seguidas pasa al **limbo** (solo
   si estaba confirmado).
 - En el limbo sigue **prediciendo** con Kalman durante `reid_frames` frames.
-- Si una detección libre aparece cerca (`reid_dist`) de la posición prevista de
-  un track del limbo → se **recupera el mismo ID** (re-ID tras oclusión).
+- Al entrar en el limbo se **congela la velocidad** (`KalmanCV.freeze()`): se
+  pone a cero y se infla la incertidumbre de posición, para que el track no
+  derive en la dirección antigua y la re-ID se base en la **última posición
+  vista** (clave si la persona giró antes de perderse).
+- Si una detección libre aparece cerca (`reid_dist`) de esa posición → se
+  **recupera el mismo ID** (re-ID tras oclusión o giro).
 - Si no, la detección libre crea un track nuevo.
 
 ### 3.8 Trayectorias (estelas)
@@ -230,11 +243,14 @@ eje X.
 | `cluster_eps` | 0.35 | radio DBSCAN (m) |
 | `cluster_min_samples` | 4 | puntos mínimos por cluster |
 | `cluster_max_size` | 0.90 | tamaño máx. de un cluster-persona (m) |
-| `track_max_dist` | 0.75 | puerta de asociación (m) — `gate_dist` |
+| `track_max_dist` | 1.00 | puerta de asociación (m) — `gate_dist` |
 | `track_confirm` | 3 | barridos para confirmar un ID (M-de-N) |
-| `track_max_misses` | 5 | fallos antes de mandar al limbo |
-| `track_max_missing` | 40 | frames recuperable en el limbo (re-ID) |
-| `track_reid_dist` | 1.0 | distancia máx. de re-ID (m) |
+| `track_max_misses` | 8 | fallos antes de mandar al limbo |
+| `track_max_missing` | 60 | frames recuperable en el limbo (re-ID) |
+| `track_reid_dist` | 1.4 | distancia máx. de re-ID (m) |
+| `kalman_q` | 0.12 | ruido de proceso (mayor = readapta antes la velocidad) |
+| `kalman_r` | 0.05 | ruido de medida (mayor = más suave) |
+| `kalman_vel_damp` | 0.88 | amortiguación de velocidad (1 = vel. constante; <1 evita pasarse al girar) |
 | `near_dist` | 1.0 | umbral "cerca" (m) |
 | `stay_near_s` | 10.0 | segundos a <cerca para "se queda" |
 | `log_csv` | True | registrar eventos en `eventos.csv` |

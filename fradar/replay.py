@@ -83,6 +83,19 @@ def escenario_oclusion(n=60, gap=(25, 40)):
     return frames
 
 
+def escenario_giro(n=44, s=0.12):
+    """Una persona entra rapido, se da la VUELTA (180 grados) dentro del alcance
+    y se aleja. Con ruido de centroide alto (como saltos pierna/torso reales).
+    Es el caso que rompia el id con velocidad constante: debe MANTENERLO."""
+    frames = []
+    for k in range(n):
+        t = k / (n - 1)
+        tri = 2 * t if t < 0.5 else 2 * (1 - t)   # 0 -> 1 -> 0 (pico = el giro)
+        y = 0.4 + 2.8 * tri                        # ~0.4m .. 3.2m .. 0.4m, rapido
+        frames.append([(_ruido((0.5, y), s), "A")])
+    return frames
+
+
 def evaluar(nombre, frames, tracker):
     """Pasa los frames por el tracker y cuenta saltos de id por persona GT."""
     ultimo_id = {}      # gt_label -> id del tracker
@@ -114,21 +127,25 @@ def evaluar(nombre, frames, tracker):
     return saltos
 
 
+# Parametros afinados (los mismos que usa el panel por defecto): gating robusto
+# + velocidad amortiguada -> aguanta cambios de direccion sin cambiar de id.
+TUNED = dict(gate_dist=1.0, n_confirm=3, max_misses=8, reid_frames=60,
+             reid_dist=1.4, q=0.12, r=0.05, vel_damp=0.88)
+
+
 def run_test():
     np.random.seed(1)
     print("=== Prueba sintetica del tracker (objetivo: 0 saltos) ===\n")
-    s1 = evaluar("cruce de 2 personas",
-                 escenario_cruce(),
-                 Tracker(gate_dist=0.8, n_confirm=3, max_misses=5,
-                         reid_frames=40, reid_dist=1.0))
+    s1 = evaluar("cruce de 2 personas", escenario_cruce(), Tracker(**TUNED))
     print()
-    s2 = evaluar("oclusion ~2s (re-id)",
-                 escenario_oclusion(),
-                 Tracker(gate_dist=0.8, n_confirm=3, max_misses=5,
-                         reid_frames=40, reid_dist=1.2))
+    s2 = evaluar("oclusion ~2s (re-id)", escenario_oclusion(), Tracker(**TUNED))
+    print()
+    s3 = evaluar("giro 180 dentro del alcance (cambio de direccion)",
+                 escenario_giro(), Tracker(**TUNED))
+    total = s1 + s2 + s3
     print("\n=== RESULTADO: %s ===" %
-          ("OK (0 saltos)" if (s1 + s2) == 0 else "%d saltos totales" % (s1 + s2)))
-    return 0 if (s1 + s2) == 0 else 1
+          ("OK (0 saltos)" if total == 0 else "%d saltos totales" % total))
+    return 0 if total == 0 else 1
 
 
 def run_file(path):

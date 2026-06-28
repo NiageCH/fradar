@@ -73,11 +73,15 @@ DEFAULTS = {
     "cluster_eps":         0.35,  # radio DBSCAN (m): puntos mas cerca = mismo objeto
     "cluster_min_samples": 4,     # puntos minimos para formar un cluster
     "cluster_max_size":    0.90,  # tamano max de un cluster (m); mayor = no es persona
-    "track_max_dist":      0.75,  # distancia max (m) para asociar persona entre frames
-    "track_max_missing":   40,    # frames que un id sigue recuperable (re-ID) tras perderse
+    "track_max_dist":      1.00,  # distancia max (m) para asociar persona entre frames
+    "track_max_missing":   60,    # frames que un id sigue recuperable (re-ID) tras perderse
     "track_confirm":       3,     # barridos seguidos para confirmar un id (anti-espurios)
-    "track_max_misses":    5,     # fallos seguidos antes de mandar el id al limbo
-    "track_reid_dist":     1.0,   # distancia max (m) para re-identificar un id perdido
+    "track_max_misses":    8,     # fallos seguidos antes de mandar el id al limbo
+    "track_reid_dist":     1.4,   # distancia max (m) para re-identificar un id perdido
+    # --- Filtro de Kalman (suavizado y robustez ante cambios de direccion) ---
+    "kalman_q":            0.12,  # ruido de proceso: mas alto = readapta antes la velocidad
+    "kalman_r":            0.05,  # ruido de medida: mas alto = mas suave (menos fia del centroide)
+    "kalman_vel_damp":     0.88,  # 1=vel.constante; <1 amortigua para no pasarse al girar
     "near_dist":           1.0,   # "cerca" = a menos de esta distancia (m)
     "stay_near_s":        10.0,   # >= este tiempo a <near_dist => "se queda cerca"
     "log_csv":             True,  # registrar eventos en eventos.csv
@@ -522,14 +526,17 @@ def hilo_lidar():
         if cfg["track_enabled"]:
             frame_no += 1
             dt = (ahora - t_prev) if t_prev else (1.0 / 7.0)
-            dt = min(0.5, max(0.01, dt))         # clamp por seguridad
+            dt = min(0.3, max(0.01, dt))         # clamp (techo bajo: menos sobrepaso al girar)
             # (re)crear el tracker si cambio la configuracion
             if tracker_obj is None or tracker_ver != cfg_ver_local:
                 tracker_obj = Tracker(gate_dist=float(cfg["track_max_dist"]),
                                       n_confirm=int(cfg["track_confirm"]),
                                       max_misses=int(cfg["track_max_misses"]),
                                       reid_frames=int(cfg["track_max_missing"]),
-                                      reid_dist=float(cfg["track_reid_dist"]))
+                                      reid_dist=float(cfg["track_reid_dist"]),
+                                      q=float(cfg["kalman_q"]),
+                                      r=float(cfg["kalman_r"]),
+                                      vel_damp=float(cfg["kalman_vel_damp"]))
                 tracker_ver = cfg_ver_local
                 personas.clear()
 
@@ -810,6 +817,12 @@ def settings():
                    campo("Frames recuperable (re-ID)", "track_max_missing", cfg,
                          nota="cuanto tiempo se recupera el MISMO id tras perderse") +
                    campo("Dist. re-ID (m)", "track_reid_dist", cfg) +
+                   campo("Kalman: ruido proceso q", "kalman_q", cfg,
+                         nota="mas alto = readapta antes la velocidad (mejor en giros)") +
+                   campo("Kalman: ruido medida r", "kalman_r", cfg,
+                         nota="mas alto = trayectoria mas suave (fia menos del centroide)") +
+                   campo("Kalman: amortiguar vel.", "kalman_vel_damp", cfg,
+                         nota="1=vel.constante; <1 evita pasarse de largo al girar (~0.88)") +
                    campo("Distancia 'cerca' (m)", "near_dist", cfg,
                          nota="se quedan si llegan a menos de esto") +
                    campo("Tiempo 'se queda' (s)", "stay_near_s", cfg,

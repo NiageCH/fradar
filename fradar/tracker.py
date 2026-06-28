@@ -25,22 +25,34 @@ from scipy.optimize import linear_sum_assignment
 class KalmanCV:
     """Kalman 2D, estado [x, y, vx, vy], modelo de velocidad constante."""
 
-    def __init__(self, xy, q=0.04, r=0.05):
+    def __init__(self, xy, q=0.04, r=0.05, vel_damp=1.0):
         self.x = np.array([xy[0], xy[1], 0.0, 0.0], dtype=float)
         self.P = np.diag([0.1, 0.1, 1.0, 1.0])
         self.q = q          # ruido de proceso (cuanto puede acelerar)
         self.r = r          # ruido de medida (cuanto se fia del centroide)
+        self.vel_damp = vel_damp   # 1.0 = velocidad constante; <1 amortigua la
+                                   # velocidad para no "pasarse de largo" al girar
 
     def predict(self, dt):
+        d = self.vel_damp
         F = np.array([[1, 0, dt, 0],
                       [0, 1, 0, dt],
-                      [0, 0, 1, 0],
-                      [0, 0, 0, 1]], dtype=float)
+                      [0, 0, d, 0],
+                      [0, 0, 0, d]], dtype=float)
         # ruido de proceso (aceleracion aleatoria)
         G = np.array([0.5 * dt * dt, 0.5 * dt * dt, dt, dt])
         Q = np.outer(G, G) * self.q
         self.x = F @ self.x
         self.P = F @ self.P @ F.T + Q
+
+    def freeze(self):
+        """Track perdido (limbo): anula la velocidad e infla la incertidumbre de
+        posicion. Asi la re-identificacion se basa en la ULTIMA posicion vista y
+        no en una prediccion que sigue avanzando en la direccion antigua."""
+        self.x[2] = 0.0
+        self.x[3] = 0.0
+        self.P[0, 0] += 0.5
+        self.P[1, 1] += 0.5
 
     def update(self, z):
         H = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype=float)
@@ -61,16 +73,17 @@ class KalmanCV:
 
 
 class Track:
-    __slots__ = ("id", "kf", "hits", "misses", "lost", "confirmed", "age")
+    __slots__ = ("id", "kf", "hits", "misses", "lost", "confirmed", "age", "last_xy")
 
-    def __init__(self, tid, xy, q, r):
+    def __init__(self, tid, xy, q, r, vel_damp=1.0):
         self.id = tid
-        self.kf = KalmanCV(xy, q, r)
+        self.kf = KalmanCV(xy, q, r, vel_damp)
         self.hits = 1
         self.misses = 0
         self.lost = 0          # frames en el limbo (perdido pero recuperable)
         self.confirmed = False
         self.age = 0
+        self.last_xy = (xy[0], xy[1])   # ultima deteccion asociada (gating robusto)
 
 
 class Tracker:
@@ -85,7 +98,7 @@ class Tracker:
     """
 
     def __init__(self, gate_dist=0.8, n_confirm=3, max_misses=5,
-                 reid_frames=40, reid_dist=1.0, q=0.04, r=0.05):
+                 reid_frames=40, reid_dist=1.0, q=0.04, r=0.05, vel_damp=1.0):
         self.gate_dist = gate_dist
         self.n_confirm = n_confirm
         self.max_misses = max_misses
@@ -93,12 +106,13 @@ class Tracker:
         self.reid_dist = reid_dist
         self.q = q
         self.r = r
+        self.vel_damp = vel_damp
         self.activos = []      # tracks vivos
         self.limbo = []        # tracks perdidos, candidatos a re-id
         self._next = 1
 
     def _nuevo(self, xy):
-        t = Track(self._next, xy, self.q, self.r)
+        t = Track(self._next, xy, self.q, self.r, self.vel_damp)
         self._next += 1
         return t
 
@@ -109,9 +123,13 @@ class Tracker:
             return [], list(range(len(tracks))), list(range(len(dets)))
         C = np.zeros((len(tracks), len(dets)))
         for i, t in enumerate(tracks):
-            px, py = t.kf.pos
+            px, py = t.kf.pos                      # posicion prevista (Kalman)
+            lx, ly = getattr(t, "last_xy", None) or (px, py)   # ultima vista
             for j, (dx, dy) in enumerate(dets):
-                C[i, j] = np.hypot(px - dx, py - dy)
+                # coste = la MENOR de las dos distancias: asi un giro brusco (la
+                # prediccion se pasa de largo) no rompe la asociacion -> mismo id
+                C[i, j] = min(np.hypot(px - dx, py - dy),
+                              np.hypot(lx - dx, ly - dy))
         ri, cj = linear_sum_assignment(C)
         parejas, ti_used, dj_used = [], set(), set()
         for i, j in zip(ri, cj):
@@ -133,6 +151,7 @@ class Tracker:
         for i, j in parejas:
             t = self.activos[i]
             t.kf.update(detecciones[j])
+            t.last_xy = detecciones[j]                     # ancla para gating robusto
             t.hits += 1; t.misses = 0
             if not t.confirmed and t.hits >= self.n_confirm:
                 t.confirmed = True                         # B3
@@ -146,6 +165,7 @@ class Tracker:
             if t.misses > self.max_misses:
                 t.lost = 0
                 if t.confirmed:
+                    t.kf.freeze()                          # ancla re-id a la ult. posicion
                     self.limbo.append(t)                   # solo re-id de ids reales
             else:
                 sobreviven.append(t)
@@ -154,12 +174,13 @@ class Tracker:
         # 4) detecciones libres: re-id contra el limbo (B4) o track nuevo
         dets_pendientes = [detecciones[j] for j in d_libres]
         for t in self.limbo:
-            t.kf.predict(dt); t.lost += 1
+            t.kf.predict(dt); t.lost += 1                  # vel=0 (congelada) -> no deriva
         re_parejas, _, rl_libres = self._asignar(self.limbo, dets_pendientes, self.reid_dist)
         reusadas = set()
         for i, j in re_parejas:
             t = self.limbo[i]
             t.kf.update(dets_pendientes[j])
+            t.last_xy = dets_pendientes[j]
             t.misses = 0; t.lost = 0
             self.activos.append(t); reusadas.add(i)        # recupera el MISMO id
         self.limbo = [t for k, t in enumerate(self.limbo)
