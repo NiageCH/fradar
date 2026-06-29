@@ -110,6 +110,7 @@ _bg_capture = False       # peticion de capturar fondo (stand vacio)
 _bg_status = "sin fondo"  # texto de estado del fondo
 _rec_request = None       # segundos de grabacion pedidos (None = nada)
 _rec_status = "sin grabacion"
+_reset_request = False    # peticion de resetear estadisticas (contadores + CSV)
 
 
 def cargar_cfg():
@@ -402,7 +403,7 @@ def build_laser(cfg):
 
 
 def hilo_lidar():
-    global _frame_png, _need_restart, _lidar_ok, _rec_request, _rec_status
+    global _frame_png, _need_restart, _lidar_ok, _rec_request, _rec_status, _reset_request
     ydlidar.os_init()
     laser = None
     F = None
@@ -490,6 +491,18 @@ def hilo_lidar():
                 fgx.append(x); fgy.append(y)
 
         ahora = time.monotonic()
+
+        # --- Reset de estadisticas (a peticion del panel) ---
+        with _lock:
+            do_reset = _reset_request
+            if do_reset:
+                _reset_request = False
+        if do_reset:
+            cnt_total = cnt_pasan = cnt_quedan = 0
+            eventos = 0
+            personas.clear()
+            presente = False; t_entrada = None
+            print("[FRadar] estadisticas reiniciadas")
 
         # --- Grabador de barridos (para afinar offline con replay.py) ---
         with _lock:
@@ -975,6 +988,21 @@ def grabar_web():
     return redirect("/settings?ok=1")
 
 
+@app.route("/reset_stats", methods=["POST"])
+def reset_stats_web():
+    """Resetea las estadisticas: vacia eventos.csv (deja solo la cabecera) y
+    pide al hilo del lidar que ponga a cero los contadores en vivo."""
+    global _reset_request
+    try:
+        with open(CSV_PATH, "w") as f:
+            f.write("fecha_hora,track_id,dwell_s,tipo\n")
+    except Exception as e:
+        print("No se pudo vaciar el CSV:", e)
+    with _lock:
+        _reset_request = True
+    return redirect("/stats?reset=1")
+
+
 @app.route("/grabaciones")
 def grabaciones():
     files = sorted([f for f in os.listdir(_DIR)
@@ -1114,6 +1142,9 @@ def stats():
    background:var(--card);transition:.15s}
  .btn:hover{border-color:var(--oro);color:var(--oro)}
  .btn.primary{background:var(--oro);color:#1a1a1a;border-color:var(--oro);font-weight:600}
+ .btn.danger{border-color:#ef444466;color:#fca5a5;cursor:pointer;font-family:var(--sans)}
+ .btn.danger:hover{border-color:#ef4444;background:#ef4444;color:#1a1a1a}
+ .nav form{margin:0}
  .wrap{max-width:880px;margin:22px auto;padding:0 18px}
  h2{font-size:14px;font-weight:600;color:var(--texto);margin:26px 0 10px;
     display:flex;align-items:center;gap:9px}
@@ -1133,6 +1164,8 @@ def stats():
      <span class="sep"></span><span class="mod">FRadar · estadísticas</span></div>
    <nav class="nav">
      <a class="btn" href="/eventos.csv">&#11015; CSV</a>
+     <form method="POST" action="/reset_stats" onsubmit="return confirm('¿Resetear TODAS las estadísticas?\\n\\nBorra el histórico (eventos.csv) y pone los contadores a cero. No se puede deshacer.');">
+       <button class="btn danger" type="submit">&#128465; Resetear</button></form>
      <a class="btn" href="/settings">&#9881; Ajustes</a>
      <a class="btn primary" href="/">&larr; Radar</a></nav>
  </header>
