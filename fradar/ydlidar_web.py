@@ -73,11 +73,18 @@ DEFAULTS = {
     "cluster_eps":         0.35,  # radio DBSCAN (m): puntos mas cerca = mismo objeto
     "cluster_min_samples": 4,     # puntos minimos para formar un cluster
     "cluster_max_size":    0.90,  # tamano max de un cluster (m); mayor = no es persona
+    "cluster_merge_dist":  0.0,   # fusiona clusters cuyos centros esten a < esto (m):
+                                  #   arregla la persona fragmentada en 2 (torso/piernas)
+                                  #   0 = desactivado. Ojo: subirlo demasiado fusiona a
+                                  #   dos personas MUY juntas. Afinar en sitio (0.5-0.6).
     "track_max_dist":      1.00,  # distancia max (m) para asociar persona entre frames
     "track_max_missing":   60,    # frames que un id sigue recuperable (re-ID) tras perderse
     "track_confirm":       3,     # barridos seguidos para confirmar un id (anti-espurios)
     "track_max_misses":    8,     # fallos seguidos antes de mandar el id al limbo
     "track_reid_dist":     1.4,   # distancia max (m) para re-identificar un id perdido
+    "dedup_dist":          0.45,  # 2 ids pegados a < esto = mismo objeto (reflexion)
+    "dedup_frames":        12,    # frames de solape sostenido antes de silenciar el dup
+                                  #   (0 en dedup_dist lo desactiva)
     # --- Filtro de Kalman (suavizado y robustez ante cambios de direccion) ---
     "kalman_q":            0.12,  # ruido de proceso: mas alto = readapta antes la velocidad
     "kalman_r":            0.05,  # ruido de medida: mas alto = mas suave (menos fia del centroide)
@@ -201,6 +208,32 @@ def log_evento(track_id, dwell, tipo):
         print("No se pudo escribir CSV:", e)
 
 
+def fusionar_centroides(cen, d):
+    """Une centroides cuyos centros estan a < d (m): una persona partida en dos
+    clusters (torso/piernas) se vuelve UNA sola deteccion -> no genera id duplicado.
+    d<=0 lo desactiva. Fusion transitiva simple (suficiente para pocos clusters)."""
+    if d <= 0 or len(cen) < 2:
+        return cen
+    usados = [False] * len(cen)
+    out = []
+    for i in range(len(cen)):
+        if usados[i]:
+            continue
+        gx = [cen[i][0]]; gy = [cen[i][1]]; usados[i] = True
+        cambiado = True
+        while cambiado:                    # arrastra vecinos de vecinos (transitivo)
+            cambiado = False
+            cx = sum(gx) / len(gx); cy = sum(gy) / len(gy)
+            for j in range(len(cen)):
+                if usados[j]:
+                    continue
+                if math.hypot(cx - cen[j][0], cy - cen[j][1]) <= d:
+                    gx.append(cen[j][0]); gy.append(cen[j][1]); usados[j] = True
+                    cambiado = True
+        out.append((sum(gx) / len(gx), sum(gy) / len(gy)))
+    return out
+
+
 def clusterizar(fgx, fgy, cfg):
     """Agrupa puntos de primer plano en personas. Devuelve lista de centroides
     (cx, cy) de clusters cuyo tamano es compatible con una persona."""
@@ -218,7 +251,7 @@ def clusterizar(fgx, fgy, cfg):
         if span > float(cfg["cluster_max_size"]):  # demasiado grande -> no es persona
             continue
         centroides.append((float(m[:, 0].mean()), float(m[:, 1].mean())))
-    return centroides
+    return fusionar_centroides(centroides, float(cfg.get("cluster_merge_dist", 0.0)))
 
 
 # --- Figura ----------------------------------------------------------------
@@ -332,6 +365,18 @@ def render_frame(F, cfg, xs, ys, ds, rxs, rys, rds, exs, eys, bxs, bys, info):
             F["overlays"].append(ax.add_collection(lc))
         F["overlays"].append(ax.add_patch(patches.Circle((x, y), 0.30, fill=False,
                                                           ec=col, lw=2.0)))
+        # flecha de direccion: hacia donde se mueve (media de las ultimas posiciones
+        # de la estela, mas estable que 2 puntos sueltos). Solo si hay movimiento.
+        if trail and len(trail) >= 3:
+            ref = trail[-min(6, len(trail))]
+            hx, hy = x - ref[0], y - ref[1]
+            paso = math.hypot(hx, hy)
+            if paso > 0.06:                       # se mueve de verdad -> dibuja flecha
+                ux, uy = hx / paso, hy / paso
+                F["overlays"].append(ax.annotate(
+                    "", xy=(x + ux * 0.45, y + uy * 0.45), xytext=(x, y),
+                    arrowprops=dict(arrowstyle="-|>", color=col, lw=2.0,
+                                    shrinkA=0, shrinkB=0)))
         if estado == "queda":
             etq = "#%d QUEDA %.0fs" % (tid, secs)
         elif estado == "cerca":
@@ -352,7 +397,9 @@ def render_frame(F, cfg, xs, ys, ds, rxs, rys, rds, exs, eys, bxs, bys, info):
         estado = ("PRESENCIA  %.1fs" % info["dwell"]) if info["presente"] else "vacio"
         F["txt"].set_text("en ROI: %3d   %s\neventos: %d   %s" %
                           (info["n_roi"], estado, info["eventos"], filtro))
-    F["ax"].set_title("FRadar  ·  %s" % time.strftime("%H:%M:%S"),
+    F["ax"].set_title("FRadar  ·  %s   ·   %.0f fps · %d pts" %
+                      (time.strftime("%H:%M:%S"), info.get("fps", 0.0),
+                       info.get("n_pts", 0)),
                       color="#e3e3e3", weight="bold")
     buf = io.BytesIO()
     F["fig"].savefig(buf, format="png", facecolor=F["fig"].get_facecolor(), dpi=80)
@@ -410,7 +457,7 @@ def hilo_lidar():
     cfg = get_cfg()
     cfg_ver_local = -1
     presente = False; t_entrada = None; eventos = 0
-    intervalo = 1.0 / 8.0; ultimo_render = 0.0
+    intervalo = 1.0 / 8.0; ultimo_render = 0.0; fps_ewma = 0.0
 
     # --- Estado de tracking de personas ---
     tracker_obj = None     # instancia de Tracker (se crea/recrea segun config)
@@ -549,7 +596,9 @@ def hilo_lidar():
                                       reid_dist=float(cfg["track_reid_dist"]),
                                       q=float(cfg["kalman_q"]),
                                       r=float(cfg["kalman_r"]),
-                                      vel_damp=float(cfg["kalman_vel_damp"]))
+                                      vel_damp=float(cfg["kalman_vel_damp"]),
+                                      dedup_dist=float(cfg.get("dedup_dist", 0.45)),
+                                      dedup_frames=int(cfg.get("dedup_frames", 12)))
                 tracker_ver = cfg_ver_local
                 personas.clear()
 
@@ -617,11 +666,16 @@ def hilo_lidar():
 
         if ahora - ultimo_render < intervalo:
             continue
+        dt_render = ahora - ultimo_render if ultimo_render else 0.0
+        if dt_render > 0:                       # FPS reales de render (media suave)
+            inst = 1.0 / dt_render
+            fps_ewma = inst if fps_ewma == 0 else (0.8 * fps_ewma + 0.2 * inst)
         ultimo_render = ahora
         en_roi_ahora = sum(1 for _, _, _, st, _, _ in tracks_vis if st in ("roi", "cerca", "queda"))
         info = {"n_roi": n_roi, "presente": presente, "dwell": dwell, "eventos": eventos,
                 "tracks": tracks_vis, "total": cnt_total, "pasan": cnt_pasan,
-                "quedan": cnt_quedan, "en_roi_ahora": en_roi_ahora}
+                "quedan": cnt_quedan, "en_roi_ahora": en_roi_ahora,
+                "fps": fps_ewma, "n_pts": len(raw)}
         png = render_frame(F, cfg, xs, ys, ds, rxs, rys, rds, exs, eys, bxs, bys, info)
         with _lock:
             _frame_png = png
@@ -822,6 +876,8 @@ def settings():
                    campo("Min. puntos cluster", "cluster_min_samples", cfg) +
                    campo("Tamano max persona (m)", "cluster_max_size", cfg,
                          nota="clusters mayores se descartan (paredes)") +
+                   campo("Fusionar clusters (m)", "cluster_merge_dist", cfg,
+                         nota="une 2 trozos de una persona (torso/piernas); 0=off; sitio 0.5-0.6") +
                    campo("Dist. asociacion (m)", "track_max_dist", cfg,
                          nota="cuanto puede moverse entre frames") +
                    campo("Confirmar id (barridos)", "track_confirm", cfg,
@@ -830,6 +886,10 @@ def settings():
                    campo("Frames recuperable (re-ID)", "track_max_missing", cfg,
                          nota="cuanto tiempo se recupera el MISMO id tras perderse") +
                    campo("Dist. re-ID (m)", "track_reid_dist", cfg) +
+                   campo("Dedup: dist. duplicado (m)", "dedup_dist", cfg,
+                         nota="2 ids pegados a < esto = mismo objeto (reflexion); 0=off") +
+                   campo("Dedup: frames solape", "dedup_frames", cfg,
+                         nota="solape sostenido antes de silenciar el id duplicado") +
                    campo("Kalman: ruido proceso q", "kalman_q", cfg,
                          nota="mas alto = readapta antes la velocidad (mejor en giros)") +
                    campo("Kalman: ruido medida r", "kalman_r", cfg,

@@ -73,7 +73,8 @@ class KalmanCV:
 
 
 class Track:
-    __slots__ = ("id", "kf", "hits", "misses", "lost", "confirmed", "age", "last_xy")
+    __slots__ = ("id", "kf", "hits", "misses", "lost", "confirmed", "age",
+                 "last_xy", "dup", "sep", "muted")
 
     def __init__(self, tid, xy, q, r, vel_damp=1.0):
         self.id = tid
@@ -84,6 +85,9 @@ class Track:
         self.confirmed = False
         self.age = 0
         self.last_xy = (xy[0], xy[1])   # ultima deteccion asociada (gating robusto)
+        self.dup = 0           # frames solapado sobre un track mas antiguo (dedup)
+        self.sep = 0           # frames separado de el (para reactivar si se separan)
+        self.muted = False     # duplicado persistente: sigue vivo pero NO se emite
 
 
 class Tracker:
@@ -98,7 +102,8 @@ class Tracker:
     """
 
     def __init__(self, gate_dist=0.8, n_confirm=3, max_misses=5,
-                 reid_frames=40, reid_dist=1.0, q=0.04, r=0.05, vel_damp=1.0):
+                 reid_frames=40, reid_dist=1.0, q=0.04, r=0.05, vel_damp=1.0,
+                 dedup_dist=0.45, dedup_frames=10):
         self.gate_dist = gate_dist
         self.n_confirm = n_confirm
         self.max_misses = max_misses
@@ -107,6 +112,11 @@ class Tracker:
         self.q = q
         self.r = r
         self.vel_damp = vel_damp
+        # dedup: dos tracks que se solapan de forma persistente = misma persona
+        # (reflexion/pierna fragmentada). El mas nuevo se silencia (dedup_dist<=0
+        # lo desactiva). dedup_frames = solape sostenido antes de silenciar.
+        self.dedup_dist = dedup_dist
+        self.dedup_frames = dedup_frames
         self.activos = []      # tracks vivos
         self.limbo = []        # tracks perdidos, candidatos a re-id
         self._next = 1
@@ -116,28 +126,66 @@ class Tracker:
         self._next += 1
         return t
 
-    @staticmethod
-    def _asignar(tracks, dets, gate):
-        """Hungarian con puerta. Devuelve (parejas, tracks_libres, dets_libres)."""
-        if not tracks or not dets:
-            return [], list(range(len(tracks))), list(range(len(dets)))
-        C = np.zeros((len(tracks), len(dets)))
+    def _match(self, tracks, dets, idx, dt, gate_base):
+        """Hungarian con puerta sobre un SUBCONJUNTO de detecciones (idx = indices
+        aun libres). Devuelve (parejas[(track, j)], tracks_libres, idx_libres).
+
+        La puerta es ADAPTATIVA al movimiento: crece con la velocidad del track y
+        con dt, asi los frames perdidos y los caminantes rapidos no rompen el id
+        (tope: como mucho el doble del radio base)."""
+        if not tracks or not idx:
+            return [], list(tracks), list(idx)
+        C = np.zeros((len(tracks), len(idx)))
+        gates = np.empty(len(tracks))
         for i, t in enumerate(tracks):
             px, py = t.kf.pos                      # posicion prevista (Kalman)
-            lx, ly = getattr(t, "last_xy", None) or (px, py)   # ultima vista
-            for j, (dx, dy) in enumerate(dets):
+            lx, ly = t.last_xy                     # ultima deteccion vista
+            vx, vy = t.kf.vel
+            gates[i] = gate_base + min(np.hypot(vx, vy) * dt, gate_base)
+            for jj, j in enumerate(idx):
+                dx, dy = dets[j]
                 # coste = la MENOR de las dos distancias: asi un giro brusco (la
                 # prediccion se pasa de largo) no rompe la asociacion -> mismo id
-                C[i, j] = min(np.hypot(px - dx, py - dy),
-                              np.hypot(lx - dx, ly - dy))
+                C[i, jj] = min(np.hypot(px - dx, py - dy),
+                               np.hypot(lx - dx, ly - dy))
         ri, cj = linear_sum_assignment(C)
         parejas, ti_used, dj_used = [], set(), set()
-        for i, j in zip(ri, cj):
-            if C[i, j] <= gate:
-                parejas.append((i, j)); ti_used.add(i); dj_used.add(j)
-        t_libres = [i for i in range(len(tracks)) if i not in ti_used]
-        d_libres = [j for j in range(len(dets)) if j not in dj_used]
-        return parejas, t_libres, d_libres
+        for i, jj in zip(ri, cj):
+            if C[i, jj] <= gates[i]:
+                parejas.append((tracks[i], idx[jj])); ti_used.add(i); dj_used.add(jj)
+        t_libres = [tracks[i] for i in range(len(tracks)) if i not in ti_used]
+        i_libres = [idx[jj] for jj in range(len(idx)) if jj not in dj_used]
+        return parejas, t_libres, i_libres
+
+    def _dedup(self):
+        """Silencia (no borra) el track mas NUEVO cuando lleva pegado a otro mas
+        antiguo un tiempo sostenido: es el MISMO objeto (reflexion / persona
+        fragmentada en dos clusters). Se conserva el id viejo. El track silenciado
+        sigue vivo y absorbiendo su deteccion, asi el duplicado no renace en bucle.
+        Si de verdad se separan (dos personas que iban juntas) se reactiva."""
+        if self.dedup_dist <= 0:
+            return
+        conf = sorted([t for t in self.activos if t.confirmed], key=lambda t: t.id)
+        for b in range(len(conf)):
+            joven = conf[b]
+            solapado = False
+            for a in range(b):                    # solo contra tracks MAS antiguos
+                viejo = conf[a]
+                if viejo.muted:
+                    continue
+                d = np.hypot(joven.kf.pos[0] - viejo.kf.pos[0],
+                             joven.kf.pos[1] - viejo.kf.pos[1])
+                if d <= self.dedup_dist:
+                    solapado = True
+                    break
+            if solapado:
+                joven.dup += 1; joven.sep = 0
+                if joven.dup >= self.dedup_frames:
+                    joven.muted = True
+            else:
+                joven.sep += 1
+                if joven.sep >= self.dedup_frames:   # separados de verdad -> reactivar
+                    joven.muted = False; joven.dup = 0
 
     def update(self, detecciones, dt):
         """detecciones: lista de (x, y) en metros. dt: segundos desde el frame
@@ -146,21 +194,30 @@ class Tracker:
         for t in self.activos:
             t.kf.predict(dt); t.age += 1
 
-        # 2) asociacion optima activos<->detecciones (B2)
-        parejas, t_libres, d_libres = self._asignar(self.activos, detecciones, self.gate_dist)
-        for i, j in parejas:
-            t = self.activos[i]
+        libres = list(range(len(detecciones)))
+
+        # 2) asociacion en DOS FASES: primero los tracks CONFIRMADOS (protege los
+        #    ids establecidos: una deteccion espuria ya no le roba la deteccion a
+        #    un id real), y solo con lo que sobra, los tentativos (B2).
+        confirmados = [t for t in self.activos if t.confirmed]
+        tentativos = [t for t in self.activos if not t.confirmed]
+        m1, _, libres = self._match(confirmados, detecciones, libres, dt, self.gate_dist)
+        m2, _, libres = self._match(tentativos, detecciones, libres, dt, self.gate_dist)
+
+        emparejados = set()
+        for t, j in (m1 + m2):
             t.kf.update(detecciones[j])
             t.last_xy = detecciones[j]                     # ancla para gating robusto
             t.hits += 1; t.misses = 0
             if not t.confirmed and t.hits >= self.n_confirm:
                 t.confirmed = True                         # B3
+            emparejados.add(id(t))
 
         # 3) activos no emparejados -> suben fallos; si pasan, al limbo
-        sobreviven = []
-        for idx, t in enumerate(self.activos):
-            if idx in [i for i, _ in parejas]:
-                sobreviven.append(t); continue
+        sobreviven = [t for t in self.activos if id(t) in emparejados]
+        for t in self.activos:
+            if id(t) in emparejados:
+                continue
             t.misses += 1
             if t.misses > self.max_misses:
                 t.lost = 0
@@ -172,26 +229,27 @@ class Tracker:
         self.activos = sobreviven
 
         # 4) detecciones libres: re-id contra el limbo (B4) o track nuevo
-        dets_pendientes = [detecciones[j] for j in d_libres]
         for t in self.limbo:
             t.kf.predict(dt); t.lost += 1                  # vel=0 (congelada) -> no deriva
-        re_parejas, _, rl_libres = self._asignar(self.limbo, dets_pendientes, self.reid_dist)
+        re_parejas, _, libres = self._match(self.limbo, detecciones, libres, dt, self.reid_dist)
         reusadas = set()
-        for i, j in re_parejas:
-            t = self.limbo[i]
-            t.kf.update(dets_pendientes[j])
-            t.last_xy = dets_pendientes[j]
+        for t, j in re_parejas:
+            t.kf.update(detecciones[j])
+            t.last_xy = detecciones[j]
             t.misses = 0; t.lost = 0
-            self.activos.append(t); reusadas.add(i)        # recupera el MISMO id
-        self.limbo = [t for k, t in enumerate(self.limbo)
-                      if k not in reusadas and t.lost <= self.reid_frames]
-        for j in rl_libres:                                # nadie reidentificado -> nuevo
-            self.activos.append(self._nuevo(dets_pendientes[j]))
+            self.activos.append(t); reusadas.add(id(t))    # recupera el MISMO id
+        self.limbo = [t for t in self.limbo
+                      if id(t) not in reusadas and t.lost <= self.reid_frames]
+        for j in libres:                                   # nadie reidentificado -> nuevo
+            self.activos.append(self._nuevo(detecciones[j]))
 
-        # 5) salida: solo confirmados vistos en este frame
+        # 5) de-duplicar duplicados persistentes (reflexiones / fragmentacion)
+        self._dedup()
+
+        # 6) salida: solo confirmados, vistos ahora y NO silenciados
         salida = []
         for t in self.activos:
-            if t.confirmed and t.misses == 0:
+            if t.confirmed and t.misses == 0 and not t.muted:
                 x, y = t.kf.pos; vx, vy = t.kf.vel
                 salida.append({"id": t.id, "x": x, "y": y, "vx": vx, "vy": vy})
         return salida

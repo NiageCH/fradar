@@ -33,7 +33,31 @@ DT = 1.0 / 8.0     # 8 fps, como el panel
 # --------------------------------------------------------------------------
 # Clustering (mismo criterio que el panel)
 # --------------------------------------------------------------------------
-def clusterizar(pts, eps=0.35, min_samples=4, max_size=0.9):
+def fusionar_centroides(cen, d):
+    """Une centroides a < d (m): una persona partida en 2 clusters -> 1 deteccion.
+    (misma logica que el panel; d<=0 lo desactiva)."""
+    if d <= 0 or len(cen) < 2:
+        return cen
+    usados = [False] * len(cen); out = []
+    for i in range(len(cen)):
+        if usados[i]:
+            continue
+        gx = [cen[i][0]]; gy = [cen[i][1]]; usados[i] = True
+        cambiado = True
+        while cambiado:
+            cambiado = False
+            cx = sum(gx) / len(gx); cy = sum(gy) / len(gy)
+            for j in range(len(cen)):
+                if usados[j]:
+                    continue
+                if np.hypot(cx - cen[j][0], cy - cen[j][1]) <= d:
+                    gx.append(cen[j][0]); gy.append(cen[j][1]); usados[j] = True
+                    cambiado = True
+        out.append((sum(gx) / len(gx), sum(gy) / len(gy)))
+    return out
+
+
+def clusterizar(pts, eps=0.35, min_samples=4, max_size=0.9, merge_dist=0.0):
     if len(pts) < min_samples:
         return []
     pts = np.asarray(pts, dtype=float)
@@ -46,7 +70,7 @@ def clusterizar(pts, eps=0.35, min_samples=4, max_size=0.9):
         if max(np.ptp(m[:, 0]), np.ptp(m[:, 1])) > max_size:
             continue
         out.append((float(m[:, 0].mean()), float(m[:, 1].mean())))
-    return out
+    return fusionar_centroides(out, merge_dist)
 
 
 # --------------------------------------------------------------------------
@@ -96,13 +120,14 @@ def escenario_giro(n=44, s=0.12):
     return frames
 
 
-def evaluar(nombre, frames, tracker):
-    """Pasa los frames por el tracker y cuenta saltos de id por persona GT."""
+def evaluar(nombre, frames, tracker, merge_dist=0.0):
+    """Pasa los frames por el tracker y cuenta saltos de id por persona GT.
+    merge_dist>0 fusiona los centroides antes de trackear (como el panel)."""
     ultimo_id = {}      # gt_label -> id del tracker
     saltos = 0
     ids_por_gt = {}
     for f in frames:
-        dets = [xy for xy, _ in f]
+        dets = fusionar_centroides([xy for xy, _ in f], merge_dist)
         gts = [g for _, g in f]
         salida = tracker.update(dets, DT)
         # asociar cada track de salida al gt mas cercano de este frame
@@ -127,25 +152,51 @@ def evaluar(nombre, frames, tracker):
     return saltos
 
 
+def escenario_fragmentacion(n=60, sep=0.45, s=0.05):
+    """UNA persona que el lidar parte en DOS clusters (torso + piernas) a ~sep m.
+    Sin fusion nacen 2 ids para la misma persona; con la fusion de clusters activa
+    debe quedar UN solo id y 0 saltos."""
+    frames = []
+    for k in range(n):
+        x = -2.0 + 4.0 * k / (n - 1)
+        frames.append([(_ruido((x, 0.6), s), "A"),
+                       (_ruido((x + sep, 0.6), s), "A")])
+    return frames
+
+
 # Parametros afinados (los mismos que usa el panel por defecto): gating robusto
 # + velocidad amortiguada -> aguanta cambios de direccion sin cambiar de id.
 TUNED = dict(gate_dist=1.0, n_confirm=3, max_misses=8, reid_frames=60,
-             reid_dist=1.4, q=0.12, r=0.05, vel_damp=0.88)
+             reid_dist=1.4, q=0.12, r=0.05, vel_damp=0.88,
+             dedup_dist=0.45, dedup_frames=12)
 
 
 def run_test():
     np.random.seed(1)
     print("=== Prueba sintetica del tracker (objetivo: 0 saltos) ===\n")
+    print("-- Continuidad de id --")
     s1 = evaluar("cruce de 2 personas", escenario_cruce(), Tracker(**TUNED))
     print()
     s2 = evaluar("oclusion ~2s (re-id)", escenario_oclusion(), Tracker(**TUNED))
     print()
     s3 = evaluar("giro 180 dentro del alcance (cambio de direccion)",
                  escenario_giro(), Tracker(**TUNED))
-    total = s1 + s2 + s3
-    print("\n=== RESULTADO: %s ===" %
-          ("OK (0 saltos)" if total == 0 else "%d saltos totales" % total))
-    return 0 if total == 0 else 1
+    print("\n-- Robustez ante id duplicado (persona fragmentada) --")
+    # sin fusion: nacen 2 ids (informativo, se espera que sea peor)
+    sin = evaluar("fragmentacion SIN fusion", escenario_fragmentacion(),
+                  Tracker(**TUNED), merge_dist=0.0)
+    print()
+    # con fusion de clusters (como se configuraria en sitio): 1 id, 0 saltos
+    con = evaluar("fragmentacion CON fusion", escenario_fragmentacion(),
+                  Tracker(**TUNED), merge_dist=0.60)
+    cont = s1 + s2 + s3
+    print("\n=== Continuidad: %s ===" %
+          ("OK (0 saltos)" if cont == 0 else "%d saltos" % cont))
+    print("=== Duplicados: fusion %s (sin=%d saltos -> con=%d saltos) ===" %
+          ("OK" if con == 0 and con < sin else "REVISAR", sin, con))
+    ok = (cont == 0 and con == 0 and con < sin)
+    print("\n=== RESULTADO GLOBAL: %s ===" % ("OK" if ok else "FALLO"))
+    return 0 if ok else 1
 
 
 def run_file(path):
