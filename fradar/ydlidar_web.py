@@ -99,6 +99,8 @@ DEFAULTS = {
     "show_trails":    True,     # dibujar la trayectoria (estela) de cada persona
     "trail_len":      40,       # nº de posiciones (suavizadas por Kalman) de la estela
     "flip_x":         False,    # espejo horizontal (si la vista sale derecha<->izquierda)
+    "half_view":      False,    # vista semicircular: recorta la mitad vacia (ROI 0-180)
+                                #   -> el contenido llena el visor (~2x mas grande)
     "cmap":           "turbo", # mapa de color por distancia
     # --- Lidar (requieren reinicio del sensor) ---
     "scan_frequency": 7.0,
@@ -261,12 +263,23 @@ def crear_figura(cfg):
     GRID = "#2f2f2f"; APAGADO = "#a8a8a8"; TEXTO = "#e3e3e3"
     ORO = "#fad51b"; ROJO = "#ef4444"
     lim = float(cfg["view_max"])
-    fig = Figure(figsize=(7.6, 7), facecolor=BG_PAGE)
-    FigureCanvasAgg(fig)
-    ax = fig.add_axes([0.08, 0.06, 0.78, 0.88])   # deja hueco a la derecha p/ barra
+    # Vista semicircular: si la ROI solo usa la mitad de arriba (0-180deg), el
+    # cuadrado completo (-lim..lim en Y) desperdicia media pantalla en vacio.
+    # Con half_view se recorta la mitad inferior -> el semicirculo util llena el
+    # visor y el contenido se ve ~2x mas grande (mismo alcance).
+    half = bool(cfg.get("half_view", False))
+    y0 = -0.4 if half else -lim              # margen pequeno por debajo del sensor
+    if half:
+        fig = Figure(figsize=(8.0, 5.0), facecolor=BG_PAGE)
+        FigureCanvasAgg(fig)
+        ax = fig.add_axes([0.06, 0.10, 0.82, 0.72])   # ancho, bajo (semicirculo)
+    else:
+        fig = Figure(figsize=(7.6, 7), facecolor=BG_PAGE)
+        FigureCanvasAgg(fig)
+        ax = fig.add_axes([0.08, 0.06, 0.78, 0.88])   # deja hueco a la derecha p/ barra
     ax.set_facecolor(BG_CARD)
     ax.set_aspect("equal")
-    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
+    ax.set_xlim(-lim, lim); ax.set_ylim(y0, lim)
     if cfg.get("flip_x"):      # espejo horizontal: corrige vista derecha<->izquierda
         ax.invert_xaxis()      # afecta a TODO (puntos, ROI, personas, estelas, ejes)
     ax.tick_params(colors=APAGADO)
@@ -276,7 +289,9 @@ def crear_figura(cfg):
         ax.add_patch(patches.Circle((0, 0), r, fill=False, ec=GRID, lw=0.8))
         ax.text(0, r, "%dm" % r, color=APAGADO, fontsize=7, ha="center", va="bottom")
     # Radios y etiquetas de grados (referencia para ajustar las zonas).
-    for ang in (0, 45, 90, 135, 180, -135, -90, -45):
+    # En vista semicircular solo se dibujan los angulos de la mitad superior.
+    angulos = (0, 45, 90, 135, 180) if half else (0, 45, 90, 135, 180, -135, -90, -45)
+    for ang in angulos:
         rad = math.radians(ang)
         cx, cy = math.cos(rad), math.sin(rad)
         es_cero = (ang == 0)
@@ -304,15 +319,19 @@ def crear_figura(cfg):
         nd = float(cfg["near_dist"])
         ax.add_patch(patches.Circle((0, 0), nd, fill=False, ec=ROJO,
                                     lw=1.3, ls="--"))
-        ax.text(0, -nd, "cerca <%.1gm" % nd, color=ROJO, fontsize=7,
-                ha="center", va="top")
+        if half:               # en semicircular la etiqueta va arriba del arco
+            ax.text(0, nd, "cerca <%.1gm" % nd, color=ROJO, fontsize=7,
+                    ha="center", va="bottom")
+        else:
+            ax.text(0, -nd, "cerca <%.1gm" % nd, color=ROJO, fontsize=7,
+                    ha="center", va="top")
     ax.plot(0, 0, "^", color=ORO, markersize=13, markeredgecolor="#0a0a0a",
             markeredgewidth=0.8)
 
     cmap = matplotlib.colormaps[cfg.get("cmap", "turbo")]
     norm = Normalize(0, lim)
     sm = ScalarMappable(norm=norm, cmap=cmap); sm.set_array([])
-    cax = fig.add_axes([0.88, 0.10, 0.03, 0.80])
+    cax = fig.add_axes([0.91, 0.12, 0.025, 0.66] if half else [0.88, 0.10, 0.03, 0.80])
     cb = fig.colorbar(sm, cax=cax)
     cb.set_label("distancia (m)", color=APAGADO)
     cb.outline.set_edgecolor(BORDE)
@@ -833,9 +852,14 @@ def settings():
                   campo("Distancia max (m)", "excl_dist_max", cfg))
     chk_trail = "checked" if cfg["show_trails"] else ""
     chk_flip = "checked" if cfg["flip_x"] else ""
+    chk_half = "checked" if cfg["half_view"] else ""
     filas_vis = (campo("Alcance vista (m)", "view_max", cfg) +
                  campo("Tamano punto", "point_size", cfg) +
                  campo("Tamano punto ROI", "roi_point_size", cfg) +
+                 "<tr><td class='lbl'>Vista semicircular</td>"
+                 "<td><input type='checkbox' name='half_view' %s></td>"
+                 "<td class='nota'>"
+                 "recorta la mitad vacía (ROI 0-180°): el radar llena el visor</td></tr>" % chk_half +
                  "<tr><td class='lbl'>Espejo horizontal</td>"
                  "<td><input type='checkbox' name='flip_x' %s></td>"
                  "<td class='nota'>"
